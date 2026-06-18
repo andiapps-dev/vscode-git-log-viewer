@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { GitService } from './gitService';
 import { DiffDocProvider } from './diffDocProvider';
+import { safeJsonStringify } from './utils';
 import {
     InitialState,
     CommitDetail,
@@ -193,6 +194,8 @@ export class GitLogPanel {
             relativePath || '.',
             msg.offset,
             msg.count,
+            msg.after,
+            msg.before,
         );
         this.panel.webview.postMessage({
             type: 'commitsLoaded',
@@ -214,21 +217,17 @@ export class GitLogPanel {
     }
 
     private async onCompareWithPrevious(msg: CompareWithPreviousMessage): Promise<void> {
-        const leftPath = msg.status === 'R' && msg.oldPath ? msg.oldPath : msg.filePath;
-        const leftSha = msg.status === 'A' ? '' : `${msg.sha}^`;
-        const rightSha = msg.status === 'D' ? '' : msg.sha;
-
-        const leftUri = leftSha
-            ? DiffDocProvider.encodeUri(this.repoRoot, leftSha, leftPath)
-            : vscode.Uri.parse(`${DiffDocProvider.scheme}:empty`);
-        const rightUri = rightSha
-            ? DiffDocProvider.encodeUri(this.repoRoot, rightSha, msg.filePath)
-            : vscode.Uri.parse(`${DiffDocProvider.scheme}:empty`);
-
-        const shortSha = msg.sha.substring(0, 8);
-        const title = `${path.basename(msg.filePath)} (${shortSha}^ ↔ ${shortSha})`;
-
-        await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+        let previousSha = msg.previousSha || null;
+        if (!previousSha) {
+            try {
+                previousSha = await this.gitService.getPreviousFileCommit(
+                    this.repoRoot, msg.sha, msg.filePath,
+                );
+            } catch { /* */ }
+        }
+        await this.openDiff(
+            previousSha || msg.sha, msg.sha, msg.filePath, msg.oldPath, msg.status,
+        );
     }
 
     private async onBlame(msg: BlameMessage): Promise<void> {
@@ -244,12 +243,7 @@ export class GitLogPanel {
     private async onCompareRevisions(msg: CompareRevisionsMessage): Promise<void> {
         if (this.initialState.isFile && this.initialState.targetPath) {
             const filePath = path.relative(this.repoRoot, this.initialState.targetPath);
-            const leftUri = DiffDocProvider.encodeUri(this.repoRoot, msg.sha1, filePath);
-            const rightUri = DiffDocProvider.encodeUri(this.repoRoot, msg.sha2, filePath);
-            const short1 = msg.sha1.substring(0, 8);
-            const short2 = msg.sha2.substring(0, 8);
-            const title = `${path.basename(filePath)} (${short1} ↔ ${short2})`;
-            await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+            await this.openDiff(msg.sha1, msg.sha2, filePath);
             return;
         }
         GitLogPanel.createComparePanel(
@@ -280,18 +274,27 @@ export class GitLogPanel {
     private async onCompareFile(msg: CompareFileMessage): Promise<void> {
         const { sha1, sha2 } = this.initialState;
         if (!sha1 || !sha2) return;
+        await this.openDiff(sha1, sha2, msg.filePath, msg.oldPath, msg.status);
+    }
 
-        const leftPath = msg.status === 'R' && msg.oldPath ? msg.oldPath : msg.filePath;
-        const leftUri = msg.status === 'A'
+    private async openDiff(
+        leftSha: string,
+        rightSha: string,
+        filePath: string,
+        oldPath?: string,
+        status?: string,
+    ): Promise<void> {
+        const leftPath = status === 'R' && oldPath ? oldPath : filePath;
+        const leftUri = status === 'A'
             ? vscode.Uri.parse(`${DiffDocProvider.scheme}:empty`)
-            : DiffDocProvider.encodeUri(this.repoRoot, sha1, leftPath);
-        const rightUri = msg.status === 'D'
+            : DiffDocProvider.encodeUri(this.repoRoot, leftSha, leftPath);
+        const rightUri = status === 'D'
             ? vscode.Uri.parse(`${DiffDocProvider.scheme}:empty`)
-            : DiffDocProvider.encodeUri(this.repoRoot, sha2, msg.filePath);
+            : DiffDocProvider.encodeUri(this.repoRoot, rightSha, filePath);
 
-        const short1 = sha1.substring(0, 8);
-        const short2 = sha2.substring(0, 8);
-        const title = `${path.basename(msg.filePath)} (${short1} ↔ ${short2})`;
+        const short1 = leftSha.substring(0, 8);
+        const short2 = rightSha.substring(0, 8);
+        const title = `${path.basename(filePath)} (${short1} ↔ ${short2})`;
 
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
     }
@@ -382,7 +385,7 @@ export class GitLogPanel {
                     <th class="col-sha" data-col="shortHash">SHA-1<span class="sort-arrow"></span></th>
                     <th class="col-message" data-col="subject">Message<span class="sort-arrow"></span></th>
                     <th class="col-author" data-col="authorName">Author<span class="sort-arrow"></span></th>
-                    <th class="col-date" data-col="authorDate">Date<span class="sort-arrow"> ▼</span></th>
+                    <th class="col-date" data-col="authorDate">Date<span class="sort-arrow"></span></th>
                 </tr></thead>
                 <tbody id="commit-tbody"></tbody>
             </table>
@@ -406,13 +409,19 @@ export class GitLogPanel {
         </div>
     </div>
     <div id="context-menu" class="context-menu" style="display:none;">
+        <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare">Compare with Previous</div>
         <div class="context-menu-item" id="ctx-blame">Blame</div>
-        <div class="context-menu-item" id="ctx-compare-file" style="display:none;">Compare</div>
-        <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
+        <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
+        <div class="context-menu-item" id="ctx-refresh">Refresh</div>
     </div>
     <div id="commit-context-menu" class="context-menu" style="display:none;">
         <div class="context-menu-item" id="ctx-compare-revisions">Compare Selected Revisions</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-commit-clear-filters" style="display:none;">Clear Filters</div>
+        <div class="context-menu-item" id="ctx-commit-refresh">Refresh</div>
     </div>
     <script nonce="${nonce}">var initialState = ${safeJsonStringify(this.initialState)};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -445,6 +454,7 @@ export class GitLogPanel {
             <div id="compare-detail-1" class="compare-detail-pane">
                 <div class="empty-state">Loading...</div>
             </div>
+            <div class="resizer-col" id="compare-resizer-col"></div>
             <div id="compare-detail-2" class="compare-detail-pane">
                 <div class="empty-state">Loading...</div>
             </div>
@@ -463,10 +473,13 @@ export class GitLogPanel {
         </div>
     </div>
     <div id="context-menu" class="context-menu" style="display:none;">
-        <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
-        <div class="context-menu-item" id="ctx-blame" style="display:none;">Blame</div>
-        <div class="context-menu-item" id="ctx-compare-file">Compare</div>
         <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
+        <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
+        <div class="context-menu-item" id="ctx-blame">Blame</div>
+        <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
+        <div class="context-menu-item" id="ctx-refresh">Refresh</div>
     </div>
     <script nonce="${nonce}">var initialState = ${safeJsonStringify(this.initialState)};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
@@ -502,25 +515,22 @@ export class GitLogPanel {
                 </table>
             </div>
         </div>
+        <div class="resizer-col" id="blame-resizer-col"></div>
         <div id="blame-commit-info" class="panel">
             <div class="empty-state">Hover over a revision to see commit details</div>
         </div>
     </div>
     <div id="context-menu" class="context-menu" style="display:none;">
+        <div class="context-menu-item" id="ctx-show-file-log" style="display:none;">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
         <div class="context-menu-item" id="ctx-blame" style="display:none;">Blame</div>
-        <div class="context-menu-item" id="ctx-compare-file" style="display:none;">Compare</div>
-        <div class="context-menu-item" id="ctx-show-file-log" style="display:none;">Show File Log</div>
+        <div class="context-menu-item" id="ctx-copy-path" style="display:none;">Copy Path</div>
     </div>
     <script nonce="${nonce}">var initialState = ${safeJsonStringify(this.initialState)};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
     }
-}
-
-function safeJsonStringify(obj: unknown): string {
-    return JSON.stringify(obj).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 }
 
 function getNonce(): string {

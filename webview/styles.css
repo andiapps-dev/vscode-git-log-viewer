@@ -34,6 +34,17 @@ body {
     background: var(--vscode-focusBorder);
 }
 
+.resizer-col {
+    width: 4px;
+    cursor: col-resize;
+    background: var(--vscode-panel-border);
+    flex-shrink: 0;
+}
+
+.resizer-col:hover {
+    background: var(--vscode-focusBorder);
+}
+
 /* Tables */
 table {
     width: 100%;
@@ -56,6 +67,22 @@ th {
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
+    position: relative;
+    overflow: hidden;
+}
+
+th .col-resizer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    cursor: col-resize;
+    z-index: 2;
+}
+
+th .col-resizer:hover {
+    background: var(--vscode-focusBorder);
 }
 
 th:hover {
@@ -66,6 +93,46 @@ th .sort-arrow {
     margin-left: 4px;
     font-size: 0.8em;
     opacity: 0.7;
+}
+
+.filter-row {
+    background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.filter-cell {
+    padding: 2px 4px !important;
+    border-bottom: 1px solid var(--vscode-panel-border) !important;
+}
+
+.filter-input {
+    width: 100%;
+    padding: 2px 4px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    font-size: var(--vscode-font-size);
+    font-family: var(--vscode-font-family);
+    outline: none;
+    box-sizing: border-box;
+}
+
+.filter-input:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.filter-input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+.date-filter-wrapper {
+    display: flex;
+    gap: 2px;
+}
+
+.filter-date {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.85em;
 }
 
 td {
@@ -82,6 +149,22 @@ tr.data-row {
 
 tr.data-row:hover {
     background: var(--vscode-list-hoverBackground);
+}
+
+.group-header-row {
+    background: var(--vscode-editorGroupHeader-tabsBackground);
+}
+
+.group-header {
+    padding: 4px 8px !important;
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+    border-bottom: 1px solid var(--vscode-panel-border) !important;
+}
+
+tr.data-row.filtered-out {
+    display: none;
 }
 
 tr.data-row.selected {
@@ -167,6 +250,12 @@ td.col-deletions { text-align: right; color: var(--vscode-gitDecoration-deletedR
     color: var(--vscode-menu-selectionForeground);
 }
 
+.context-menu-separator {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
+}
+
 /* Compare mode layout */
 #app.compare-mode {
     grid-template-rows: auto auto 4px 1fr;
@@ -187,9 +276,7 @@ td.col-deletions { text-align: right; color: var(--vscode-gitDecoration-deletedR
 
 .compare-details {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--vscode-panel-border);
+    grid-template-columns: 1fr 4px 1fr;
     max-height: 200px;
     overflow: hidden;
 }
@@ -223,7 +310,7 @@ td.col-deletions { text-align: right; color: var(--vscode-gitDecoration-deletedR
 /* Blame mode */
 #app.blame-mode {
     display: grid;
-    grid-template-columns: 1fr 280px;
+    grid-template-columns: 1fr 4px 280px;
     grid-template-rows: 1fr;
     height: 100vh;
 }

@@ -5,9 +5,11 @@ node_modules/**
 tsconfig.json
 tsconfig.webview.json
 esbuild.mjs
+vitest.config.ts
 .gitignore
 install.sh
 build.sh
+test.sh
 *.vsix
 *.bak
 package-lock.json

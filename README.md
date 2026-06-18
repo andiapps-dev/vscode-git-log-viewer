@@ -7,9 +7,19 @@ A TortoiseGit-inspired git log viewer for VS Code. Right-click any file or folde
 ### Git Log Dialog
 Right-click a file or folder in the VS Code Explorer and select **Show Git Log** to open a three-panel log viewer:
 
-- **Commit list** — sortable columns (SHA, Message, Author, Date) with infinite scroll pagination
+- **Commit list** — sortable, resizable, filterable columns (SHA, Message, Author, Date) with lazy loading (100 commits per batch, loads more on scroll)
 - **Commit details** — full SHA, author, date, and commit message body
 - **Changed files** — files modified in the selected commit with status, lines added/removed
+
+### Filtering
+- **Text filters** — each column header has a filter input; type to filter rows by that column
+- **Date range picker** — the Date column has From/To date inputs that query git directly, so filtering works across the full history without needing to scroll-load everything
+- When text filters are active and few matches are visible, additional commits are loaded automatically
+
+### Resizable UI
+- **Panel dividers** — drag the horizontal dividers between the three panels to resize them
+- **Column widths** — drag the right edge of any column header to resize; double-click the edge to auto-expand to fit content
+- **Blame and Compare panels** — vertical dividers are also draggable
 
 ### Compare Revisions
 Ctrl+click two commits in the log view, then right-click and select **Compare Selected Revisions** to see all files changed between those commits. Each commit's details are shown side-by-side at the top for context.
@@ -29,6 +39,8 @@ Right-click a file in the changed files list and select **Blame** to open an int
 - **Right panel** — source code with line numbers, scroll-synced with the gutter
 - **Commit info panel** — hover over any line to see full commit details; click to lock the selection
 
+Blame is performed at the selected commit's revision, not HEAD.
+
 ### Theme Support
 All views automatically adapt to your VS Code theme (dark, light, or high contrast) using native CSS variables.
 
@@ -46,7 +58,10 @@ All views automatically adapt to your VS Code theme (dark, light, or high contra
 | Ctrl+Click commit | Multi-select (up to 2 commits for comparison) |
 | Right-click commit (2 selected) | Compare Selected Revisions |
 | Double-click file | Compare with previous revision |
-| Right-click file | Context menu: Compare, Blame, Show File Log |
+| Right-click file | Show File Log, Compare, Blame, Copy Path |
+| Right-click (commit list) | Refresh, Clear Filters |
+| Drag column header edge | Resize column |
+| Double-click column header edge | Auto-expand column to fit content |
 
 ## Requirements
 

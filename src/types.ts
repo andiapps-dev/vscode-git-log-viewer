@@ -21,6 +21,7 @@ export interface FileChange {
     status: string;
     additions: number;
     deletions: number;
+    parentGroup?: string;
 }
 
 export type WebviewMode = 'log' | 'compare' | 'blame';
@@ -51,6 +52,8 @@ export interface RequestCommitsMessage {
     type: 'requestCommits';
     offset: number;
     count: number;
+    after?: string;
+    before?: string;
 }
 
 export interface RequestCommitDetailsMessage {
@@ -61,6 +64,7 @@ export interface RequestCommitDetailsMessage {
 export interface CompareWithPreviousMessage {
     type: 'compareWithPrevious';
     sha: string;
+    previousSha?: string;
     filePath: string;
     oldPath?: string;
     status: string;

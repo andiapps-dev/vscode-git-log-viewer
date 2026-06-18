@@ -27,6 +27,7 @@ interface FileChange {
     status: string;
     additions: number;
     deletions: number;
+    parentGroup?: string;
 }
 
 interface InitialState {
@@ -45,10 +46,11 @@ const state: InitialState = (window as unknown as { initialState: InitialState }
 let allCommits: Commit[] = [];
 let allFiles: FileChange[] = [];
 const selectedCommitShas: string[] = [];
+let fileListCommitSha: string | null = null;
 let hasMore = true;
 let loading = false;
 
-let commitSortColumn: keyof Commit = 'authorDate';
+let commitSortColumn: keyof Commit | null = null;
 let commitSortAsc = false;
 let fileSortColumn: keyof FileChange = 'path';
 let fileSortAsc = true;
@@ -93,7 +95,9 @@ function updateSortArrows(tableId: string, column: string, asc: boolean): void {
 
 function renderCommits(): void {
     if (!commitTbody) return;
-    const sorted = sortArray(allCommits, commitSortColumn, commitSortAsc);
+    const sorted = commitSortColumn
+        ? sortArray(allCommits, commitSortColumn, commitSortAsc)
+        : allCommits;
     commitTbody.innerHTML = '';
     for (const commit of sorted) {
         const tr = document.createElement('tr');
@@ -122,12 +126,39 @@ function renderCommits(): void {
         const tdDate = document.createElement('td');
         tdDate.className = 'col-date';
         tdDate.textContent = formatDate(commit.authorDate);
+        tdDate.dataset.rawDate = commit.authorDate;
         tr.appendChild(tdDate);
 
         tr.addEventListener('click', (e) => onCommitClick(commit.hash, e));
         tr.addEventListener('contextmenu', (e) => showCommitContextMenu(e));
         commitTbody.appendChild(tr);
     }
+    if (hasActiveFilters()) {
+        applyFilters(false);
+    }
+}
+
+function selectFirstVisibleCommit(): void {
+    if (!commitTbody) return;
+    const firstVisible = commitTbody.querySelector('tr.data-row:not(.filtered-out)') as HTMLElement | null;
+    if (firstVisible && firstVisible.dataset.sha) {
+        onCommitClick(firstVisible.dataset.sha, new MouseEvent('click'));
+    } else {
+        clearDetailPanels();
+    }
+}
+
+function clearDetailPanels(): void {
+    selectedCommitShas.length = 0;
+    fileListCommitSha = null;
+    if (commitTbody) {
+        commitTbody.querySelectorAll('tr').forEach(tr => tr.classList.remove('selected'));
+    }
+    if (commitDetailPanel) {
+        commitDetailPanel.innerHTML = '<div class="empty-state">No commits to display</div>';
+    }
+    allFiles = [];
+    if (filesTbody) filesTbody.innerHTML = '';
 }
 
 function formatDate(isoDate: string): string {
@@ -169,9 +200,19 @@ function onCommitClick(sha: string, e: MouseEvent): void {
 // --- Commit context menu (log mode) ---
 
 function showCommitContextMenu(e: MouseEvent): void {
-    if (!commitContextMenu || selectedCommitShas.length < 2) return;
+    if (!commitContextMenu) return;
     e.preventDefault();
     e.stopPropagation();
+
+    const compareRevItem = document.getElementById('ctx-compare-revisions');
+    const commitClearFilters = document.getElementById('ctx-commit-clear-filters');
+    if (compareRevItem) {
+        compareRevItem.style.display = selectedCommitShas.length === 2 ? '' : 'none';
+    }
+    if (commitClearFilters) {
+        commitClearFilters.style.display = hasActiveFilters() ? '' : 'none';
+    }
+
     commitContextMenu.style.display = 'block';
     commitContextMenu.style.left = `${e.clientX}px`;
     commitContextMenu.style.top = `${e.clientY}px`;
@@ -194,6 +235,23 @@ if (document.getElementById('ctx-compare-revisions')) {
             });
         }
         hideCommitContextMenu();
+    });
+}
+
+const ctxCommitClearFilters = document.getElementById('ctx-commit-clear-filters');
+if (ctxCommitClearFilters) {
+    ctxCommitClearFilters.addEventListener('click', () => {
+        hideCommitContextMenu();
+        clearAllFilters();
+        reloadCommits();
+    });
+}
+
+const ctxCommitRefresh = document.getElementById('ctx-commit-refresh');
+if (ctxCommitRefresh) {
+    ctxCommitRefresh.addEventListener('click', () => {
+        hideCommitContextMenu();
+        reloadCommits();
     });
 }
 
@@ -253,9 +311,36 @@ function renderCompareDetail(panelId: string, detail: CommitDetail): void {
 // --- Files list rendering (shared between both modes) ---
 
 function renderFiles(): void {
-    const sorted = sortArray(allFiles, fileSortColumn, fileSortAsc);
+    const hasGroups = allFiles.some(f => f.parentGroup);
+    let sorted: FileChange[];
+    if (hasGroups) {
+        const groups = new Map<string, FileChange[]>();
+        for (const f of allFiles) {
+            const key = f.parentGroup || '';
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(f);
+        }
+        sorted = [];
+        for (const files of groups.values()) {
+            sorted.push(...sortArray(files, fileSortColumn, fileSortAsc));
+        }
+    } else {
+        sorted = sortArray(allFiles, fileSortColumn, fileSortAsc);
+    }
     filesTbody.innerHTML = '';
+    let currentGroup = '';
     for (const file of sorted) {
+        if (file.parentGroup && file.parentGroup !== currentGroup) {
+            currentGroup = file.parentGroup;
+            const groupRow = document.createElement('tr');
+            groupRow.className = 'group-header-row';
+            const groupCell = document.createElement('td');
+            groupCell.colSpan = 4;
+            groupCell.className = 'group-header';
+            groupCell.textContent = currentGroup;
+            groupRow.appendChild(groupCell);
+            filesTbody.appendChild(groupRow);
+        }
         const tr = document.createElement('tr');
         tr.className = 'data-row';
         tr.dataset.path = file.path;
@@ -309,6 +394,9 @@ function renderFiles(): void {
         });
         filesTbody.appendChild(tr);
     }
+    if (hasActiveFilters()) {
+        applyFilters(false);
+    }
 }
 
 function statusClass(s: string): string {
@@ -342,8 +430,14 @@ function escapeHtml(text: string): string {
 
 let contextFile: FileChange | null = null;
 
-function showFileContextMenu(e: MouseEvent, file: FileChange): void {
-    if (state.mode === 'log' && selectedCommitShas.length === 0) return;
+function hasActiveFilters(): boolean {
+    for (const v of Object.values(filterValues)) { if (v) return true; }
+    for (const v of Object.values(dateFilterFrom)) { if (v) return true; }
+    for (const v of Object.values(dateFilterTo)) { if (v) return true; }
+    return false;
+}
+
+function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     e.preventDefault();
     e.stopPropagation();
     contextFile = file;
@@ -351,24 +445,47 @@ function showFileContextMenu(e: MouseEvent, file: FileChange): void {
     contextMenu.style.left = `${e.clientX}px`;
     contextMenu.style.top = `${e.clientY}px`;
 
-    // Show/hide items based on mode
     const compareItem = document.getElementById('ctx-compare')!;
     const blameItem = document.getElementById('ctx-blame')!;
-    const compareFileItem = document.getElementById('ctx-compare-file');
     const showLogItem = document.getElementById('ctx-show-file-log')!;
+    const clearFiltersItem = document.getElementById('ctx-clear-filters');
 
-    if (state.mode === 'log') {
-        compareItem.style.display = '';
-        blameItem.style.display = '';
-        if (compareFileItem) compareFileItem.style.display = 'none';
+    if (file) {
+        showLogItem.style.display = '';
+        if (state.mode === 'log') {
+            compareItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
+            blameItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
+        } else if (state.mode === 'compare') {
+            compareItem.style.display = '';
+            blameItem.style.display = '';
+        } else {
+            compareItem.style.display = 'none';
+            blameItem.style.display = 'none';
+        }
     } else {
+        showLogItem.style.display = 'none';
         compareItem.style.display = 'none';
         blameItem.style.display = 'none';
-        if (compareFileItem) compareFileItem.style.display = '';
     }
-    showLogItem.style.display = '';
+
+    const copyPathItem = document.getElementById('ctx-copy-path');
+    if (copyPathItem) copyPathItem.style.display = file ? '' : 'none';
+
+    if (clearFiltersItem) {
+        clearFiltersItem.style.display = hasActiveFilters() ? '' : 'none';
+    }
+
+    const refreshItem = document.getElementById('ctx-refresh');
+    const separator = contextMenu.querySelector('.context-menu-separator');
+    if (refreshItem) refreshItem.style.display = 'none';
+    const showSeparator = file || hasActiveFilters();
+    if (separator) (separator as HTMLElement).style.display = showSeparator ? '' : 'none';
 
     clampMenu(contextMenu);
+}
+
+function showFileContextMenu(e: MouseEvent, file: FileChange): void {
+    showContextMenuAt(e, file);
 }
 
 function hideFileContextMenu(): void {
@@ -386,42 +503,59 @@ function clampMenu(menu: HTMLElement): void {
     }
 }
 
-// Log mode: Compare with Previous
+// Compare with Previous
 document.getElementById('ctx-compare')!.addEventListener('click', () => {
-    if (contextFile && selectedCommitShas.length >= 1) {
-        vscode.postMessage({
-            type: 'compareWithPrevious',
-            sha: selectedCommitShas[selectedCommitShas.length - 1],
-            filePath: contextFile.path,
-            oldPath: contextFile.oldPath,
-            status: contextFile.status,
-        });
+    if (!contextFile) { hideFileContextMenu(); return; }
+    const sha = fileListCommitSha
+        || (selectedCommitShas.length >= 1 ? selectedCommitShas[selectedCommitShas.length - 1] : null)
+        || state.sha2;
+    if (!sha) { hideFileContextMenu(); return; }
+
+    // Find the previous commit from the displayed list
+    let previousSha: string | undefined;
+    if (commitTbody) {
+        const rows = Array.from(
+            commitTbody.querySelectorAll('tr.data-row:not(.filtered-out)')
+        ) as HTMLElement[];
+        const idx = rows.findIndex(r => r.dataset.sha === sha);
+        if (idx >= 0 && idx + 1 < rows.length) {
+            previousSha = rows[idx + 1].dataset.sha;
+        }
     }
+
+    vscode.postMessage({
+        type: 'compareWithPrevious',
+        sha,
+        previousSha,
+        filePath: contextFile.path,
+        oldPath: contextFile.oldPath,
+        status: contextFile.status,
+    });
     hideFileContextMenu();
 });
 
-// Log mode: Blame
+// Blame
 document.getElementById('ctx-blame')!.addEventListener('click', () => {
-    if (contextFile && selectedCommitShas.length >= 1) {
+    if (!contextFile) { hideFileContextMenu(); return; }
+    const sha = fileListCommitSha
+        || (selectedCommitShas.length >= 1 ? selectedCommitShas[selectedCommitShas.length - 1] : null)
+        || state.sha2;
+    if (sha) {
         vscode.postMessage({
             type: 'blame',
-            sha: selectedCommitShas[selectedCommitShas.length - 1],
+            sha,
             filePath: contextFile.path,
         });
     }
     hideFileContextMenu();
 });
 
-// Compare mode: Compare file between the two revisions
-if (document.getElementById('ctx-compare-file')) {
-    document.getElementById('ctx-compare-file')!.addEventListener('click', () => {
+// Copy path
+const ctxCopyPath = document.getElementById('ctx-copy-path');
+if (ctxCopyPath) {
+    ctxCopyPath.addEventListener('click', () => {
         if (contextFile) {
-            vscode.postMessage({
-                type: 'compareFile',
-                filePath: contextFile.path,
-                oldPath: contextFile.oldPath,
-                status: contextFile.status,
-            });
+            navigator.clipboard.writeText(contextFile.path);
         }
         hideFileContextMenu();
     });
@@ -438,6 +572,57 @@ document.getElementById('ctx-show-file-log')!.addEventListener('click', () => {
     hideFileContextMenu();
 });
 
+function clearAllFilters(): void {
+    Object.keys(filterValues).forEach(k => delete filterValues[k]);
+    Object.keys(dateFilterFrom).forEach(k => delete dateFilterFrom[k]);
+    Object.keys(dateFilterTo).forEach(k => delete dateFilterTo[k]);
+    document.querySelectorAll<HTMLInputElement>('.filter-input').forEach(input => {
+        input.value = '';
+    });
+}
+
+const ctxRefresh = document.getElementById('ctx-refresh');
+if (ctxRefresh) {
+    ctxRefresh.addEventListener('click', () => {
+        hideFileContextMenu();
+        if (state.mode === 'log') {
+            reloadCommits();
+        } else if (state.mode === 'compare') {
+            vscode.postMessage({ type: 'requestCompareFiles' });
+        }
+    });
+}
+
+const ctxClearFilters = document.getElementById('ctx-clear-filters');
+if (ctxClearFilters) {
+    ctxClearFilters.addEventListener('click', () => {
+        hideFileContextMenu();
+        clearAllFilters();
+        if (state.mode === 'log') {
+            reloadCommits();
+        } else if (state.mode === 'compare') {
+            applyFilters();
+        }
+    });
+}
+
+// Panel-level right-click for Refresh/Clear Filters
+const commitListPanel = document.getElementById('commit-list-panel');
+if (commitListPanel) {
+    commitListPanel.addEventListener('contextmenu', (e) => {
+        if ((e.target as HTMLElement).closest('tr.data-row')) return;
+        showCommitContextMenu(e as MouseEvent);
+    });
+}
+
+const filesPanel = document.getElementById('files-changed-panel');
+if (filesPanel) {
+    filesPanel.addEventListener('contextmenu', (e) => {
+        if ((e.target as HTMLElement).closest('tr.data-row')) return;
+        showContextMenuAt(e as MouseEvent, null);
+    });
+}
+
 document.addEventListener('click', () => {
     hideFileContextMenu();
     hideCommitContextMenu();
@@ -453,6 +638,7 @@ document.addEventListener('keydown', (e) => {
 
 document.querySelectorAll('#commit-table th[data-col]').forEach(th => {
     th.addEventListener('click', () => {
+        if (columnResizing) return;
         const col = (th as HTMLElement).dataset.col as keyof Commit;
         if (commitSortColumn === col) {
             commitSortAsc = !commitSortAsc;
@@ -467,6 +653,7 @@ document.querySelectorAll('#commit-table th[data-col]').forEach(th => {
 
 document.querySelectorAll('#files-table th[data-col]').forEach(th => {
     th.addEventListener('click', () => {
+        if (columnResizing) return;
         const col = (th as HTMLElement).dataset.col as keyof FileChange;
         if (fileSortColumn === col) {
             fileSortAsc = !fileSortAsc;
@@ -490,10 +677,42 @@ if (loadMore) {
     observer.observe(loadMore);
 }
 
+function autoLoadIfNeeded(): void {
+    if (!hasMore || loading || !commitTbody || !hasActiveFilters()) return;
+    const total = commitTbody.querySelectorAll('tr.data-row').length;
+    const hidden = commitTbody.querySelectorAll('tr.data-row.filtered-out').length;
+    const visible = total - hidden;
+    if (visible < 20) {
+        requestMoreCommits();
+    }
+}
+
 function requestMoreCommits(): void {
     loading = true;
     if (loadMore) loadMore.textContent = 'Loading...';
-    vscode.postMessage({ type: 'requestCommits', offset: allCommits.length, count: 100 });
+    const msg: Record<string, unknown> = {
+        type: 'requestCommits',
+        offset: allCommits.length,
+        count: 100,
+    };
+    if (dateFilterFrom['authorDate']) {
+        msg.after = dateFilterFrom['authorDate'] + 'T00:00:00';
+    }
+    if (dateFilterTo['authorDate']) {
+        msg.before = dateFilterTo['authorDate'] + 'T23:59:59';
+    }
+    vscode.postMessage(msg);
+}
+
+function reloadCommits(): void {
+    allCommits = [];
+    selectedCommitShas.length = 0;
+    hasMore = true;
+    if (commitTbody) commitTbody.innerHTML = '';
+    if (commitDetailPanel) commitDetailPanel.innerHTML = '<div class="empty-state">Select a commit to view details</div>';
+    if (filesTbody) filesTbody.innerHTML = '';
+    if (loadMore) loadMore.style.display = '';
+    requestMoreCommits();
 }
 
 // --- Panel resizing ---
@@ -531,6 +750,220 @@ document.querySelectorAll('.resizer').forEach(resizer => {
         document.removeEventListener('mouseup', onMouseUp);
     }
 });
+
+// --- Column (vertical) panel resizing ---
+
+document.querySelectorAll('.resizer-col').forEach(resizer => {
+    let startX = 0;
+    let startCols: number[] = [];
+
+    const el = resizer as HTMLElement;
+    const parent = el.parentElement!;
+
+    el.addEventListener('mousedown', (e: Event) => {
+        const me = e as MouseEvent;
+        startX = me.clientX;
+        const computed = getComputedStyle(parent);
+        startCols = computed.gridTemplateColumns.split(' ').map(v => parseFloat(v));
+        document.addEventListener('mousemove', onColMove);
+        document.addEventListener('mouseup', onColUp);
+        e.preventDefault();
+    });
+
+    function onColMove(e: MouseEvent): void {
+        const resizerIndex = Array.from(parent.children).indexOf(el);
+        const panelLeft = resizerIndex - 1;
+        const panelRight = resizerIndex + 1;
+        const delta = e.clientX - startX;
+        const newCols = [...startCols];
+        newCols[panelLeft] = Math.max(50, startCols[panelLeft] + delta);
+        newCols[panelRight] = Math.max(50, startCols[panelRight] - delta);
+        parent.style.gridTemplateColumns = newCols.map(v => `${v}px`).join(' ');
+    }
+
+    function onColUp(): void {
+        document.removeEventListener('mousemove', onColMove);
+        document.removeEventListener('mouseup', onColUp);
+    }
+});
+
+// --- Column resizing ---
+
+let columnResizing = false;
+
+function initColumnResizers(): void {
+    document.querySelectorAll('th[data-col]').forEach(th => {
+        const resizer = document.createElement('div');
+        resizer.className = 'col-resizer';
+        th.appendChild(resizer);
+
+        let startX = 0;
+        let startWidth = 0;
+
+        resizer.addEventListener('mousedown', (e: Event) => {
+            const me = e as MouseEvent;
+            me.stopPropagation();
+            me.preventDefault();
+            columnResizing = true;
+            startX = me.clientX;
+            startWidth = (th as HTMLElement).offsetWidth;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+
+        resizer.addEventListener('dblclick', (e: Event) => {
+            e.stopPropagation();
+            autoExpandColumn(th as HTMLElement);
+        });
+
+        function onMouseMove(e: MouseEvent): void {
+            const delta = e.clientX - startX;
+            const newWidth = Math.max(40, startWidth + delta);
+            (th as HTMLElement).style.width = `${newWidth}px`;
+        }
+
+        function onMouseUp(): void {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            setTimeout(() => { columnResizing = false; }, 0);
+        }
+    });
+}
+
+function autoExpandColumn(th: HTMLElement): void {
+    const table = th.closest('table');
+    if (!table) return;
+    const colIndex = Array.from(th.parentElement!.children).indexOf(th);
+    let maxWidth = th.scrollWidth;
+    table.querySelectorAll('tbody tr').forEach(row => {
+        const cell = row.children[colIndex] as HTMLElement;
+        if (cell) {
+            maxWidth = Math.max(maxWidth, cell.scrollWidth + 16);
+        }
+    });
+    th.style.width = `${Math.min(maxWidth, 600)}px`;
+}
+
+initColumnResizers();
+
+// --- Column filtering ---
+
+const filterValues: Record<string, string> = {};
+const dateFilterFrom: Record<string, string> = {};
+const dateFilterTo: Record<string, string> = {};
+const dateColumns = ['authorDate'];
+const noFilterColumns = ['additions', 'deletions'];
+
+function initColumnFilters(): void {
+    document.querySelectorAll('thead').forEach(thead => {
+        const headerRow = thead.querySelector('tr');
+        if (!headerRow) return;
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'filter-row';
+        headerRow.querySelectorAll('th').forEach(th => {
+            const td = document.createElement('td');
+            td.className = 'filter-cell';
+            const col = (th as HTMLElement).dataset.col || '';
+            if (col && noFilterColumns.includes(col)) {
+                // no filter for these columns
+            } else if (col && dateColumns.includes(col)) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'date-filter-wrapper';
+                const fromInput = document.createElement('input');
+                fromInput.type = 'date';
+                fromInput.className = 'filter-input filter-date';
+                fromInput.title = 'From date';
+                fromInput.addEventListener('input', () => {
+                    dateFilterFrom[col] = fromInput.value;
+                    if (state.mode === 'log') reloadCommits();
+                    else applyFilters();
+                });
+                fromInput.addEventListener('click', (e) => e.stopPropagation());
+                const toInput = document.createElement('input');
+                toInput.type = 'date';
+                toInput.className = 'filter-input filter-date';
+                toInput.title = 'To date';
+                toInput.addEventListener('input', () => {
+                    dateFilterTo[col] = toInput.value;
+                    if (state.mode === 'log') reloadCommits();
+                    else applyFilters();
+                });
+                toInput.addEventListener('click', (e) => e.stopPropagation());
+                wrapper.appendChild(fromInput);
+                wrapper.appendChild(toInput);
+                td.appendChild(wrapper);
+            } else if (col) {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'filter-input';
+                input.placeholder = 'Filter...';
+                input.dataset.col = col;
+                input.addEventListener('input', () => {
+                    filterValues[col] = input.value.toLowerCase();
+                    const isCommitFilter = input.closest('#commit-table') !== null;
+                    applyFilters(isCommitFilter);
+                    if (isCommitFilter) autoLoadIfNeeded();
+                });
+                input.addEventListener('click', (e) => e.stopPropagation());
+                td.appendChild(input);
+            }
+            filterRow.appendChild(td);
+        });
+        thead.appendChild(filterRow);
+    });
+}
+
+function applyFilters(autoSelect: boolean = true): void {
+    document.querySelectorAll('tbody').forEach(tbody => {
+        const id = tbody.id;
+        if (id === 'blame-gutter-tbody' || id === 'blame-code-tbody') return;
+        tbody.querySelectorAll('tr.data-row').forEach(row => {
+            const cells = row.querySelectorAll('td');
+            const thead = row.closest('table')?.querySelector('thead tr');
+            if (!thead) return;
+            let visible = true;
+            const ths = thead.querySelectorAll('th[data-col]');
+            ths.forEach((th, i) => {
+                const col = (th as HTMLElement).dataset.col || '';
+                if (dateColumns.includes(col)) {
+                    // In log mode, date filtering is handled server-side via --since/--until
+                    if (state.mode !== 'log') {
+                        const rawDate = (cells[i] as HTMLElement)?.dataset.rawDate || '';
+                        const cellDate = rawDate ? new Date(rawDate) : null;
+                        if (!cellDate || isNaN(cellDate.getTime())) return;
+                        const from = dateFilterFrom[col];
+                        const to = dateFilterTo[col];
+                        if (from) {
+                            const fromDate = new Date(from + 'T00:00:00');
+                            if (cellDate < fromDate) visible = false;
+                        }
+                        if (to) {
+                            const toDate = new Date(to + 'T23:59:59');
+                            if (cellDate > toDate) visible = false;
+                        }
+                    }
+                } else {
+                    const filter = filterValues[col];
+                    if (filter && cells[i]) {
+                        const text = (cells[i] as HTMLElement).textContent?.toLowerCase() || '';
+                        if (!text.includes(filter)) {
+                            visible = false;
+                        }
+                    }
+                }
+            });
+            row.classList.toggle('filtered-out', !visible);
+        });
+    });
+
+    if (autoSelect && commitTbody) {
+        selectedCommitShas.length = 0;
+        selectFirstVisibleCommit();
+    }
+
+}
+
+initColumnFilters();
 
 // --- Blame mode rendering ---
 
@@ -730,12 +1163,16 @@ window.addEventListener('message', (event) => {
                 loadMore.textContent = 'Scroll for more...';
             }
             if (allCommits.length > 0 && selectedCommitShas.length === 0) {
-                onCommitClick(allCommits[0].hash, new MouseEvent('click'));
+                selectFirstVisibleCommit();
+            } else if (allCommits.length === 0) {
+                clearDetailPanels();
             }
+            autoLoadIfNeeded();
             break;
         }
         case 'commitDetailsLoaded': {
             renderCommitDetail(msg.detail);
+            fileListCommitSha = msg.detail.hash;
             allFiles = msg.files;
             fileSortColumn = 'path';
             fileSortAsc = true;

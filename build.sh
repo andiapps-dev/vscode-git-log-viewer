@@ -23,7 +23,7 @@ sudo rm -rf "$SCRIPT_DIR/node_modules" "$SCRIPT_DIR/dist"
 
 echo "Building extension in Docker..."
 sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -c \
-    "npm install --silent 2>&1 && npm run build 2>&1 && npx @vscode/vsce package 2>&1"
+    "npm install 2>&1 && npm run build 2>&1 && npx @vscode/vsce package 2>&1"
 
 # Fix ownership of build output
 sudo chown -R "$(id -u):$(id -g)" "$SCRIPT_DIR"
