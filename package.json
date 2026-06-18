@@ -2,7 +2,7 @@
   "name": "git-log-viewer",
   "displayName": "Git Log Viewer",
   "description": "TortoiseGit-style log dialog for files and folders",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "publisher": "ghanjiboy",
   "repository": {
