@@ -50,7 +50,8 @@
     "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "package": "vsce package",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",
@@ -58,6 +59,7 @@
     "typescript": "^5.4.0",
     "esbuild": "^0.21.0",
     "@vscode/vsce": "^3.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@vitest/coverage-v8": "^3.2.0"
   }
 }

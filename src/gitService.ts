@@ -35,7 +35,15 @@ export function parseStatusAndNumstat(statusOut: string, numstatOut: string): Fi
         const parts = line.split('\t');
         const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10);
         const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10);
-        const filePath = parts.length === 3 ? parts[2] : parts[3];
+        let filePath = parts.length === 3 ? parts[2] : parts[3];
+
+        // Handle rename {old => new} format in numstat
+        const renameMatch = filePath.match(/^(.*)\{(.+) => (.+)\}(.*)$/);
+        if (renameMatch) {
+            const [, prefix, , newName, suffix] = renameMatch;
+            filePath = prefix + newName + suffix;
+        }
+
         const info = statusMap.get(filePath) || { status: 'M' };
         files.push({
             path: filePath,
@@ -167,8 +175,8 @@ export class GitService {
 
         if (parents.length <= 1) {
             const [statusOut, numstatOut] = await Promise.all([
-                exec(['diff-tree', '--root', '--no-commit-id', '-r', '--name-status', sha], repoRoot),
-                exec(['diff-tree', '--root', '--no-commit-id', '-r', '--numstat', sha], repoRoot),
+                exec(['diff-tree', '--root', '--no-commit-id', '-r', '-M', '--name-status', sha], repoRoot),
+                exec(['diff-tree', '--root', '--no-commit-id', '-r', '-M', '--numstat', sha], repoRoot),
             ]);
             return parseStatusAndNumstat(statusOut, numstatOut);
         }
@@ -177,8 +185,8 @@ export class GitService {
         for (let i = 0; i < parents.length; i++) {
             const parent = parents[i];
             const [statusOut, numstatOut] = await Promise.all([
-                exec(['diff-tree', '--no-commit-id', '-r', '--name-status', parent, sha], repoRoot),
-                exec(['diff-tree', '--no-commit-id', '-r', '--numstat', parent, sha], repoRoot),
+                exec(['diff-tree', '--no-commit-id', '-r', '-M', '--name-status', parent, sha], repoRoot),
+                exec(['diff-tree', '--no-commit-id', '-r', '-M', '--numstat', parent, sha], repoRoot),
             ]);
             const files = parseStatusAndNumstat(statusOut, numstatOut);
             const shortParent = parent.substring(0, 8);
@@ -195,7 +203,7 @@ export class GitService {
             return await exec(['show', `${sha}:${filePath}`], repoRoot);
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (msg.includes('does not exist') || msg.includes('bad revision')) {
+            if (msg.includes('does not exist') || msg.includes('bad revision') || msg.includes('not in')) {
                 return '';
             }
             throw e;

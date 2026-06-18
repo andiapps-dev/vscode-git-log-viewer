@@ -1,3 +1,5 @@
+import { sortArray, statusClass, statusLabel, escapeHtml, formatDate, formatTimeAgo } from './utils';
+
 declare function acquireVsCodeApi(): {
     postMessage(msg: unknown): void;
     getState(): unknown;
@@ -64,19 +66,6 @@ const contextMenu = document.getElementById('context-menu')!;
 const commitContextMenu = document.getElementById('commit-context-menu');
 
 // --- Sorting ---
-
-function sortArray<T>(arr: T[], key: keyof T, asc: boolean): T[] {
-    return [...arr].sort((a, b) => {
-        const va = a[key];
-        const vb = b[key];
-        if (typeof va === 'number' && typeof vb === 'number') {
-            return asc ? va - vb : vb - va;
-        }
-        const sa = String(va);
-        const sb = String(vb);
-        return asc ? sa.localeCompare(sb) : sb.localeCompare(sa);
-    });
-}
 
 function updateSortArrows(tableId: string, column: string, asc: boolean): void {
     const table = document.getElementById(tableId);
@@ -161,15 +150,6 @@ function clearDetailPanels(): void {
     if (filesTbody) filesTbody.innerHTML = '';
 }
 
-function formatDate(isoDate: string): string {
-    try {
-        const d = new Date(isoDate);
-        return d.toLocaleString();
-    } catch {
-        return isoDate;
-    }
-}
-
 function onCommitClick(sha: string, e: MouseEvent): void {
     if (e.ctrlKey || e.metaKey) {
         const idx = selectedCommitShas.indexOf(sha);
@@ -227,11 +207,16 @@ function hideCommitContextMenu(): void {
 
 if (document.getElementById('ctx-compare-revisions')) {
     document.getElementById('ctx-compare-revisions')!.addEventListener('click', () => {
-        if (selectedCommitShas.length === 2) {
+        if (selectedCommitShas.length === 2 && commitTbody) {
+            const rows = Array.from(commitTbody.querySelectorAll('tr.data-row')) as HTMLElement[];
+            const idx0 = rows.findIndex(r => r.dataset.sha === selectedCommitShas[0]);
+            const idx1 = rows.findIndex(r => r.dataset.sha === selectedCommitShas[1]);
+            const olderSha = idx0 > idx1 ? selectedCommitShas[0] : selectedCommitShas[1];
+            const newerSha = idx0 > idx1 ? selectedCommitShas[1] : selectedCommitShas[0];
             vscode.postMessage({
                 type: 'compareRevisions',
-                sha1: selectedCommitShas[0],
-                sha2: selectedCommitShas[1],
+                sha1: olderSha,
+                sha2: newerSha,
             });
         }
         hideCommitContextMenu();
@@ -397,33 +382,6 @@ function renderFiles(): void {
     if (hasActiveFilters()) {
         applyFilters(false);
     }
-}
-
-function statusClass(s: string): string {
-    switch (s) {
-        case 'A': return 'added';
-        case 'M': return 'modified';
-        case 'D': return 'deleted';
-        case 'R': return 'renamed';
-        default: return 'modified';
-    }
-}
-
-function statusLabel(s: string): string {
-    switch (s) {
-        case 'A': return 'Added';
-        case 'M': return 'Modified';
-        case 'D': return 'Deleted';
-        case 'R': return 'Renamed';
-        case 'C': return 'Copied';
-        default: return s;
-    }
-}
-
-function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // --- File context menu (shared) ---
@@ -1129,21 +1087,6 @@ function showBlameCommitInfo(sha: string): void {
         bodyDiv.textContent = bodyText;
         infoPanel.appendChild(bodyDiv);
     }
-}
-
-function formatTimeAgo(timestamp: number): string {
-    const seconds = Math.floor(Date.now() / 1000 - timestamp);
-    if (seconds < 60) return 'just now';
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    const months = Math.floor(days / 30);
-    if (months < 12) return `${months}mo ago`;
-    const years = Math.floor(days / 365);
-    return `${years}y ago`;
 }
 
 // --- Message handling ---
