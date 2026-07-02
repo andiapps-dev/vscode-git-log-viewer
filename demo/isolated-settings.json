@@ -1,0 +1,19 @@
+{
+    "workbench.colorTheme": "Dark Modern",
+    "workbench.startupEditor": "none",
+    "workbench.tips.enabled": false,
+    "workbench.enableExperiments": false,
+    "telemetry.telemetryLevel": "off",
+    "update.mode": "none",
+    "extensions.ignoreRecommendations": true,
+    "window.zoomLevel": 1,
+    "editor.minimap.enabled": false,
+    "git.decorations.enabled": true,
+    "explorer.confirmDragAndDrop": false,
+    "explorer.confirmDelete": false,
+    "workbench.activityBar.location": "default",
+    "window.commandCenter": false,
+    "diffEditor.renderSideBySide": true,
+    "diffEditor.useInlineViewWhenSpaceIsLimited": false,
+    "window.title": "DEMO-RECORDING-MARKER ♦ ${activeEditorShort}${separator}${rootName}"
+}

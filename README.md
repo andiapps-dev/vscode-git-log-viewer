@@ -2,6 +2,8 @@
 
 A TortoiseGit-inspired git log viewer for VS Code. Right-click any file or folder in the Explorer — or a file open in the editor — to view its git history in an interactive, multi-panel tab.
 
+![Git Log Viewer demo](demo/output/git-log-viewer-demo.gif)
+
 ## Features
 
 ### Git Log Dialog

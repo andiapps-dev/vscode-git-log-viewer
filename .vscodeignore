@@ -2,6 +2,8 @@
 src/**
 webview/**
 node_modules/**
+demo/**
+coverage/**
 tsconfig.json
 tsconfig.webview.json
 esbuild.mjs
