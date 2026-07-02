@@ -52,6 +52,13 @@ const selectedCommitShas: string[] = [];
 let fileListCommitSha: string | null = null;
 let hasMore = true;
 let loading = false;
+// Tracks the sha of the most recent requestCommitDetails call, so a
+// commitDetailsLoaded response can be dropped if it's not for the current
+// selection. Typing quickly into a commit-list filter re-selects the first
+// visible row on every keystroke, firing one request per keystroke; without
+// this guard, an intermediate row's response arriving after the final one
+// silently overwrites the detail panel/file list with the wrong commit.
+let latestRequestedDetailSha: string | null = null;
 
 let commitSortColumn: keyof Commit | null = null;
 let commitSortAsc = false;
@@ -193,6 +200,7 @@ function onCommitClick(sha: string, e: MouseEvent): void {
     }
 
     if (selectedCommitShas.length === 1) {
+        latestRequestedDetailSha = sha;
         vscode.postMessage({ type: 'requestCommitDetails', sha });
     }
 }
@@ -1159,6 +1167,9 @@ window.addEventListener('message', (event) => {
             break;
         }
         case 'commitDetailsLoaded': {
+            if (msg.detail.hash !== latestRequestedDetailSha) {
+                break;
+            }
             renderCommitDetail(msg.detail);
             fileListCommitSha = msg.detail.hash;
             allFiles = msg.files;
