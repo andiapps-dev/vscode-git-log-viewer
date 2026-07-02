@@ -7,13 +7,14 @@ export function activate(context: vscode.ExtensionContext) {
     const gitService = new GitService();
     const diffProvider = new DiffDocProvider(gitService);
 
-    const handler = (uri: vscode.Uri) => {
-        if (!uri) {
+    const handler = (uri?: vscode.Uri) => {
+        const target = uri || vscode.window.activeTextEditor?.document.uri;
+        if (!target) {
             return;
         }
         GitLogPanel.createLogPanel(
             context.extensionUri,
-            uri.fsPath,
+            target.fsPath,
             gitService,
         );
     };

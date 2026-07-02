@@ -71,6 +71,14 @@ export interface CompareWithPreviousMessage {
     status: string;
 }
 
+export interface CompareWithWorkingTreeMessage {
+    type: 'compareWithWorkingTree';
+    sha: string;
+    filePath: string;
+    oldPath?: string;
+    status: string;
+}
+
 export interface BlameMessage {
     type: 'blame';
     sha: string;

@@ -424,6 +424,7 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     contextMenu.style.top = `${e.clientY}px`;
 
     const compareItem = document.getElementById('ctx-compare')!;
+    const compareWorkingItem = document.getElementById('ctx-compare-working')!;
     const blameItem = document.getElementById('ctx-blame')!;
     const showLogItem = document.getElementById('ctx-show-file-log')!;
     const clearFiltersItem = document.getElementById('ctx-clear-filters');
@@ -432,17 +433,21 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
         showLogItem.style.display = '';
         if (state.mode === 'log') {
             compareItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
+            compareWorkingItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
             blameItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
         } else if (state.mode === 'compare') {
             compareItem.style.display = '';
+            compareWorkingItem.style.display = '';
             blameItem.style.display = '';
         } else {
             compareItem.style.display = 'none';
+            compareWorkingItem.style.display = 'none';
             blameItem.style.display = 'none';
         }
     } else {
         showLogItem.style.display = 'none';
         compareItem.style.display = 'none';
+        compareWorkingItem.style.display = 'none';
         blameItem.style.display = 'none';
     }
 
@@ -481,12 +486,18 @@ function clampMenu(menu: HTMLElement): void {
     }
 }
 
+// Resolves which commit's version of the selected file the file list is showing
+function resolveFileListSha(): string | null {
+    return fileListCommitSha
+        || (selectedCommitShas.length >= 1 ? selectedCommitShas[selectedCommitShas.length - 1] : null)
+        || state.sha2
+        || null;
+}
+
 // Compare with Previous
 document.getElementById('ctx-compare')!.addEventListener('click', () => {
     if (!contextFile) { hideFileContextMenu(); return; }
-    const sha = fileListCommitSha
-        || (selectedCommitShas.length >= 1 ? selectedCommitShas[selectedCommitShas.length - 1] : null)
-        || state.sha2;
+    const sha = resolveFileListSha();
     if (!sha) { hideFileContextMenu(); return; }
 
     // Find the previous commit from the displayed list
@@ -512,12 +523,26 @@ document.getElementById('ctx-compare')!.addEventListener('click', () => {
     hideFileContextMenu();
 });
 
+// Compare with Working Tree
+document.getElementById('ctx-compare-working')!.addEventListener('click', () => {
+    if (!contextFile) { hideFileContextMenu(); return; }
+    const sha = resolveFileListSha();
+    if (!sha) { hideFileContextMenu(); return; }
+
+    vscode.postMessage({
+        type: 'compareWithWorkingTree',
+        sha,
+        filePath: contextFile.path,
+        oldPath: contextFile.oldPath,
+        status: contextFile.status,
+    });
+    hideFileContextMenu();
+});
+
 // Blame
 document.getElementById('ctx-blame')!.addEventListener('click', () => {
     if (!contextFile) { hideFileContextMenu(); return; }
-    const sha = fileListCommitSha
-        || (selectedCommitShas.length >= 1 ? selectedCommitShas[selectedCommitShas.length - 1] : null)
-        || state.sha2;
+    const sha = resolveFileListSha();
     if (sha) {
         vscode.postMessage({
             type: 'blame',

@@ -2,7 +2,7 @@
   "name": "vscode-git-log-viewer",
   "displayName": "Git Log Viewer",
   "description": "TortoiseGit-style log dialog for files and folders",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "license": "MIT",
   "publisher": "andiapps",
   "repository": {
@@ -31,8 +31,15 @@
       "explorer/context": [
         {
           "command": "gitLogViewer.showLog",
-          "group": "git",
+          "group": "zzz_gitLogViewer",
           "when": "config.git.enabled && gitOpenRepositoryCount != 0"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "gitLogViewer.showLog",
+          "group": "zzz_gitLogViewer",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0 && resourceScheme == file"
         }
       ],
       "commandPalette": [
@@ -41,7 +48,15 @@
           "when": "false"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "gitLogViewer.showLog",
+        "key": "ctrl+alt+]",
+        "mac": "cmd+alt+]",
+        "when": "editorTextFocus && config.git.enabled && gitOpenRepositoryCount != 0"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run build",

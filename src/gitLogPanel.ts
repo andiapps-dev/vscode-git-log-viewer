@@ -10,6 +10,7 @@ import {
     RequestCommitsMessage,
     RequestCommitDetailsMessage,
     CompareWithPreviousMessage,
+    CompareWithWorkingTreeMessage,
     BlameMessage,
     CompareRevisionsMessage,
     CompareFileMessage,
@@ -161,6 +162,9 @@ export class GitLogPanel {
                 case 'compareWithPrevious':
                     await this.onCompareWithPrevious(msg as CompareWithPreviousMessage);
                     break;
+                case 'compareWithWorkingTree':
+                    await this.onCompareWithWorkingTree(msg as CompareWithWorkingTreeMessage);
+                    break;
                 case 'blame':
                     await this.onBlame(msg as BlameMessage);
                     break;
@@ -230,6 +234,10 @@ export class GitLogPanel {
         );
     }
 
+    private async onCompareWithWorkingTree(msg: CompareWithWorkingTreeMessage): Promise<void> {
+        await this.openDiffWithWorkingTree(msg.sha, msg.filePath, msg.status);
+    }
+
     private async onBlame(msg: BlameMessage): Promise<void> {
         GitLogPanel.createBlamePanel(
             this.extensionUri,
@@ -295,6 +303,22 @@ export class GitLogPanel {
         const short1 = leftSha.substring(0, 8);
         const short2 = rightSha.substring(0, 8);
         const title = `${path.basename(filePath)} (${short1} ↔ ${short2})`;
+
+        await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+    }
+
+    private async openDiffWithWorkingTree(
+        sha: string,
+        filePath: string,
+        status?: string,
+    ): Promise<void> {
+        const leftUri = status === 'D'
+            ? vscode.Uri.parse(`${DiffDocProvider.scheme}:empty`)
+            : DiffDocProvider.encodeUri(this.repoRoot, sha, filePath);
+        const rightUri = vscode.Uri.file(path.join(this.repoRoot, filePath));
+
+        const shortSha = sha.substring(0, 8);
+        const title = `${path.basename(filePath)} (${shortSha} ↔ Working Tree)`;
 
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
     }
@@ -411,6 +435,7 @@ export class GitLogPanel {
     <div id="context-menu" class="context-menu" style="display:none;">
         <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare">Compare with Previous</div>
+        <div class="context-menu-item" id="ctx-compare-working">Compare with Working Tree</div>
         <div class="context-menu-item" id="ctx-blame">Blame</div>
         <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
         <div class="context-menu-separator"></div>
@@ -475,6 +500,7 @@ export class GitLogPanel {
     <div id="context-menu" class="context-menu" style="display:none;">
         <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
+        <div class="context-menu-item" id="ctx-compare-working" style="display:none;">Compare with Working Tree</div>
         <div class="context-menu-item" id="ctx-blame">Blame</div>
         <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
         <div class="context-menu-separator"></div>
@@ -523,6 +549,7 @@ export class GitLogPanel {
     <div id="context-menu" class="context-menu" style="display:none;">
         <div class="context-menu-item" id="ctx-show-file-log" style="display:none;">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
+        <div class="context-menu-item" id="ctx-compare-working" style="display:none;">Compare with Working Tree</div>
         <div class="context-menu-item" id="ctx-blame" style="display:none;">Blame</div>
         <div class="context-menu-item" id="ctx-copy-path" style="display:none;">Copy Path</div>
     </div>

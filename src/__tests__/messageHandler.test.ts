@@ -21,7 +21,7 @@ function createHandler(
     overrides?: { sender?: MessageSender; diffOpener?: DiffOpener; panelCreator?: PanelCreator },
 ) {
     const sender: MessageSender = overrides?.sender || { postMessage: vi.fn() };
-    const diffOpener: DiffOpener = overrides?.diffOpener || { openDiff: vi.fn() };
+    const diffOpener: DiffOpener = overrides?.diffOpener || { openDiff: vi.fn(), openDiffWithWorkingTree: vi.fn() };
     const panelCreator: PanelCreator = overrides?.panelCreator || {
         createBlamePanel: vi.fn(),
         createComparePanel: vi.fn(),
@@ -126,6 +126,25 @@ describe('compareWithPrevious', () => {
 
         const openDiff = (diffOpener.openDiff as ReturnType<typeof vi.fn>);
         expect(openDiff.mock.calls[0][0]).toBe(prevSha);
+    });
+});
+
+describe('compareWithWorkingTree', () => {
+    it('calls openDiffWithWorkingTree with the given sha, path, and status', async () => {
+        const { handler, diffOpener } = createHandler();
+        const file = 'src/components/footer.ts';
+        const sha = repo.commits['dev-1'] || repo.commits['dev-0'];
+
+        await handler.handle({
+            type: 'compareWithWorkingTree',
+            sha,
+            filePath: file,
+            status: 'M',
+        });
+
+        const openDiffWithWorkingTree = (diffOpener.openDiffWithWorkingTree as ReturnType<typeof vi.fn>);
+        expect(openDiffWithWorkingTree).toHaveBeenCalledTimes(1);
+        expect(openDiffWithWorkingTree).toHaveBeenCalledWith(sha, file, 'M');
     });
 });
 

@@ -20,7 +20,9 @@ sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -
       pkg.contributes.commands[0].command = \"gitLogViewerDev.showLog\";
       pkg.contributes.commands[0].title = \"Show Git Log (Dev)\";
       pkg.contributes.menus[\"explorer/context\"][0].command = \"gitLogViewerDev.showLog\";
+      pkg.contributes.menus[\"editor/context\"][0].command = \"gitLogViewerDev.showLog\";
       pkg.contributes.menus.commandPalette[0].command = \"gitLogViewerDev.showLog\";
+      pkg.contributes.keybindings[0].command = \"gitLogViewerDev.showLog\";
       require(\"fs\").writeFileSync(\"package.json\", JSON.stringify(pkg, null, 2));
     "
 

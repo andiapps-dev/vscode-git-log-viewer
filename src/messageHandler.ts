@@ -6,6 +6,7 @@ import {
     RequestCommitsMessage,
     RequestCommitDetailsMessage,
     CompareWithPreviousMessage,
+    CompareWithWorkingTreeMessage,
     CompareFileMessage,
 } from './types';
 
@@ -15,6 +16,7 @@ export interface MessageSender {
 
 export interface DiffOpener {
     openDiff(leftSha: string, rightSha: string, filePath: string, oldPath?: string, status?: string): Promise<void>;
+    openDiffWithWorkingTree(sha: string, filePath: string, status?: string): Promise<void>;
 }
 
 export interface PanelCreator {
@@ -45,6 +47,9 @@ export class MessageHandler {
                     break;
                 case 'compareWithPrevious':
                     await this.onCompareWithPrevious(msg as CompareWithPreviousMessage);
+                    break;
+                case 'compareWithWorkingTree':
+                    await this.onCompareWithWorkingTree(msg as CompareWithWorkingTreeMessage);
                     break;
                 case 'blame':
                     await this.onBlame(msg as { sha: string; filePath: string });
@@ -113,6 +118,10 @@ export class MessageHandler {
         await this.diffOpener.openDiff(
             previousSha || msg.sha, msg.sha, msg.filePath, msg.oldPath, msg.status,
         );
+    }
+
+    private async onCompareWithWorkingTree(msg: CompareWithWorkingTreeMessage): Promise<void> {
+        await this.diffOpener.openDiffWithWorkingTree(msg.sha, msg.filePath, msg.status);
     }
 
     private async onBlame(msg: { sha: string; filePath: string }): Promise<void> {
