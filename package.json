@@ -2,7 +2,7 @@
   "name": "vscode-git-log-viewer",
   "displayName": "Git Log Viewer",
   "description": "TortoiseGit-style log dialog for files and folders",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "license": "MIT",
   "publisher": "andiapps",
   "repository": {
