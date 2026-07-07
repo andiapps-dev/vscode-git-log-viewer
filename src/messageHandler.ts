@@ -86,6 +86,7 @@ export class MessageHandler {
             msg.count,
             msg.after,
             msg.before,
+            this.initialState.isFile,
         );
         this.sender.postMessage({
             type: 'commitsLoaded',

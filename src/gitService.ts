@@ -153,9 +153,11 @@ export class GitService {
         return hashes.length >= 2 ? hashes[1] : null;
     }
 
-    async getLog(repoRoot: string, targetPath: string, skip: number, count: number, after?: string, before?: string): Promise<Commit[]> {
+    async getLog(repoRoot: string, targetPath: string, skip: number, count: number, after?: string, before?: string, followRenames = false): Promise<Commit[]> {
         const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D`;
         const args = ['log', '--decorate=short', `--format=${format}`, `--skip=${skip}`, `-${count}`];
+        // --follow only tracks renames for a single file; git errors/ignores it for directories.
+        if (followRenames && targetPath !== '.') args.push('--follow');
         if (after) args.push(`--since=${after}`);
         if (before) args.push(`--until=${before}`);
         args.push('--', targetPath);
