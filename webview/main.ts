@@ -218,7 +218,7 @@ function showCommitContextMenu(e: MouseEvent): void {
         compareRevItem.style.display = selectedCommitShas.length === 2 ? '' : 'none';
     }
     if (commitClearFilters) {
-        commitClearFilters.style.display = hasActiveFilters() ? '' : 'none';
+        commitClearFilters.style.display = '';
     }
 
     commitContextMenu.style.display = 'block';
@@ -256,6 +256,8 @@ if (ctxCommitClearFilters) {
     ctxCommitClearFilters.addEventListener('click', () => {
         hideCommitContextMenu();
         clearAllFilters();
+        resetCommitSort();
+        resetFileSort();
         reloadCommits();
     });
 }
@@ -463,14 +465,13 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     if (copyPathItem) copyPathItem.style.display = file ? '' : 'none';
 
     if (clearFiltersItem) {
-        clearFiltersItem.style.display = hasActiveFilters() ? '' : 'none';
+        clearFiltersItem.style.display = '';
     }
 
     const refreshItem = document.getElementById('ctx-refresh');
     const separator = contextMenu.querySelector('.context-menu-separator');
     if (refreshItem) refreshItem.style.display = 'none';
-    const showSeparator = file || hasActiveFilters();
-    if (separator) (separator as HTMLElement).style.display = showSeparator ? '' : 'none';
+    if (separator) (separator as HTMLElement).style.display = '';
 
     clampMenu(contextMenu);
 }
@@ -592,6 +593,19 @@ function clearAllFilters(): void {
     });
 }
 
+function resetCommitSort(): void {
+    commitSortColumn = null;
+    commitSortAsc = false;
+    document.getElementById('commit-table')?.querySelectorAll('th .sort-arrow')
+        .forEach(el => { el.textContent = ''; });
+}
+
+function resetFileSort(): void {
+    fileSortColumn = 'path';
+    fileSortAsc = true;
+    updateSortArrows('files-table', 'path', true);
+}
+
 const ctxRefresh = document.getElementById('ctx-refresh');
 if (ctxRefresh) {
     ctxRefresh.addEventListener('click', () => {
@@ -609,10 +623,12 @@ if (ctxClearFilters) {
     ctxClearFilters.addEventListener('click', () => {
         hideFileContextMenu();
         clearAllFilters();
+        resetCommitSort();
+        resetFileSort();
         if (state.mode === 'log') {
             reloadCommits();
         } else if (state.mode === 'compare') {
-            applyFilters();
+            renderFiles();
         }
     });
 }
