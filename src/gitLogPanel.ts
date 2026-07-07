@@ -4,18 +4,8 @@ import * as fs from 'fs';
 import { GitService } from './gitService';
 import { DiffDocProvider } from './diffDocProvider';
 import { safeJsonStringify } from './utils';
-import {
-    InitialState,
-    CommitDetail,
-    RequestCommitsMessage,
-    RequestCommitDetailsMessage,
-    CompareWithPreviousMessage,
-    CompareWithWorkingTreeMessage,
-    BlameMessage,
-    CompareRevisionsMessage,
-    CompareFileMessage,
-    ShowFileLogMessage,
-} from './types';
+import { MessageHandler } from './messageHandler';
+import { InitialState } from './types';
 
 const openPanels = new Map<string, GitLogPanel>();
 
@@ -150,139 +140,35 @@ export class GitLogPanel {
 
     private async handleMessage(msg: unknown): Promise<void> {
         await this.ready;
-        const message = msg as { type: string };
-        try {
-            switch (message.type) {
-                case 'requestCommits':
-                    await this.onRequestCommits(msg as RequestCommitsMessage);
-                    break;
-                case 'requestCommitDetails':
-                    await this.onRequestCommitDetails(msg as RequestCommitDetailsMessage);
-                    break;
-                case 'compareWithPrevious':
-                    await this.onCompareWithPrevious(msg as CompareWithPreviousMessage);
-                    break;
-                case 'compareWithWorkingTree':
-                    await this.onCompareWithWorkingTree(msg as CompareWithWorkingTreeMessage);
-                    break;
-                case 'blame':
-                    await this.onBlame(msg as BlameMessage);
-                    break;
-                case 'compareRevisions':
-                    await this.onCompareRevisions(msg as CompareRevisionsMessage);
-                    break;
-                case 'requestCompareFiles':
-                    await this.onRequestCompareFiles();
-                    break;
-                case 'compareFile':
-                    await this.onCompareFile(msg as CompareFileMessage);
-                    break;
-                case 'showFileLog':
-                    await this.onShowFileLog(msg as ShowFileLogMessage);
-                    break;
-                case 'requestBlameData':
-                    await this.onRequestBlameData();
-                    break;
-            }
-        } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            this.postError(errMsg);
+        await this.getMessageHandler().handle(msg);
+    }
+
+    private messageHandler?: MessageHandler;
+
+    private getMessageHandler(): MessageHandler {
+        if (!this.messageHandler) {
+            this.messageHandler = new MessageHandler(
+                this.gitService,
+                { postMessage: msg => { this.panel.webview.postMessage(msg); } },
+                {
+                    openDiff: (leftSha, rightSha, filePath, oldPath, status) =>
+                        this.openDiff(leftSha, rightSha, filePath, oldPath, status),
+                    openDiffWithWorkingTree: (sha, filePath, status) =>
+                        this.openDiffWithWorkingTree(sha, filePath, status),
+                },
+                {
+                    createBlamePanel: (sha, filePath) =>
+                        GitLogPanel.createBlamePanel(this.extensionUri, this.repoRoot, sha, filePath, this.gitService),
+                    createComparePanel: (sha1, sha2) =>
+                        GitLogPanel.createComparePanel(this.extensionUri, this.repoRoot, sha1, sha2, this.gitService),
+                    createFileLogPanel: filePath =>
+                        GitLogPanel.createFileLogPanel(this.extensionUri, this.repoRoot, filePath, this.gitService),
+                },
+                this.repoRoot,
+                this.initialState,
+            );
         }
-    }
-
-    private async onRequestCommits(msg: RequestCommitsMessage): Promise<void> {
-        const targetPath = this.initialState.targetPath || '';
-        const relativePath = path.relative(this.repoRoot, targetPath);
-        const commits = await this.gitService.getLog(
-            this.repoRoot,
-            relativePath || '.',
-            msg.offset,
-            msg.count,
-            msg.after,
-            msg.before,
-        );
-        this.panel.webview.postMessage({
-            type: 'commitsLoaded',
-            commits,
-            hasMore: commits.length === msg.count,
-        });
-    }
-
-    private async onRequestCommitDetails(msg: RequestCommitDetailsMessage): Promise<void> {
-        const [detail, files] = await Promise.all([
-            this.gitService.getCommitDetail(this.repoRoot, msg.sha),
-            this.gitService.getCommitFiles(this.repoRoot, msg.sha),
-        ]);
-        this.panel.webview.postMessage({
-            type: 'commitDetailsLoaded',
-            detail,
-            files,
-        });
-    }
-
-    private async onCompareWithPrevious(msg: CompareWithPreviousMessage): Promise<void> {
-        let previousSha = msg.previousSha || null;
-        if (!previousSha) {
-            try {
-                previousSha = await this.gitService.getPreviousFileCommit(
-                    this.repoRoot, msg.sha, msg.filePath,
-                );
-            } catch { /* */ }
-        }
-        await this.openDiff(
-            previousSha || msg.sha, msg.sha, msg.filePath, msg.oldPath, msg.status,
-        );
-    }
-
-    private async onCompareWithWorkingTree(msg: CompareWithWorkingTreeMessage): Promise<void> {
-        await this.openDiffWithWorkingTree(msg.sha, msg.filePath, msg.status);
-    }
-
-    private async onBlame(msg: BlameMessage): Promise<void> {
-        GitLogPanel.createBlamePanel(
-            this.extensionUri,
-            this.repoRoot,
-            msg.sha,
-            msg.filePath,
-            this.gitService,
-        );
-    }
-
-    private async onCompareRevisions(msg: CompareRevisionsMessage): Promise<void> {
-        if (this.initialState.isFile && this.initialState.targetPath) {
-            const filePath = path.relative(this.repoRoot, this.initialState.targetPath);
-            await this.openDiff(msg.sha1, msg.sha2, filePath);
-            return;
-        }
-        GitLogPanel.createComparePanel(
-            this.extensionUri,
-            this.repoRoot,
-            msg.sha1,
-            msg.sha2,
-            this.gitService,
-        );
-    }
-
-    private async onRequestCompareFiles(): Promise<void> {
-        const { sha1, sha2 } = this.initialState;
-        if (!sha1 || !sha2) return;
-        const [files, detail1, detail2] = await Promise.all([
-            this.gitService.getDiffBetween(this.repoRoot, sha1, sha2),
-            this.gitService.getCommitDetail(this.repoRoot, sha1),
-            this.gitService.getCommitDetail(this.repoRoot, sha2),
-        ]);
-        this.panel.webview.postMessage({
-            type: 'compareFilesLoaded',
-            files,
-            detail1,
-            detail2,
-        });
-    }
-
-    private async onCompareFile(msg: CompareFileMessage): Promise<void> {
-        const { sha1, sha2 } = this.initialState;
-        if (!sha1 || !sha2) return;
-        await this.openDiff(sha1, sha2, msg.filePath, msg.oldPath, msg.status);
+        return this.messageHandler;
     }
 
     private async openDiff(
@@ -321,38 +207,6 @@ export class GitLogPanel {
         const title = `${path.basename(filePath)} (${shortSha} ↔ Working Tree)`;
 
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
-    }
-
-    private async onShowFileLog(msg: ShowFileLogMessage): Promise<void> {
-        GitLogPanel.createFileLogPanel(
-            this.extensionUri,
-            this.repoRoot,
-            msg.filePath,
-            this.gitService,
-        );
-    }
-
-    private async onRequestBlameData(): Promise<void> {
-        const { blameSha, blameFilePath } = this.initialState;
-        if (!blameSha || !blameFilePath) return;
-
-        const blameLines = await this.gitService.blameStructured(this.repoRoot, blameSha, blameFilePath);
-
-        const uniqueShas = [...new Set(blameLines.map(l => l.sha))];
-        const detailPromises = uniqueShas.map(sha =>
-            this.gitService.getCommitDetail(this.repoRoot, sha),
-        );
-        const details = await Promise.all(detailPromises);
-        const commits: Record<string, CommitDetail> = {};
-        for (let i = 0; i < uniqueShas.length; i++) {
-            commits[uniqueShas[i]] = details[i];
-        }
-
-        this.panel.webview.postMessage({
-            type: 'blameDataLoaded',
-            lines: blameLines,
-            commits,
-        });
     }
 
     private postError(message: string): void {
