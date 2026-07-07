@@ -120,6 +120,23 @@ describe('getLog', () => {
             const expected = parseInt(rawGit(['rev-list', '--count', 'HEAD', '--', dir]), 10);
             expect(commits.length).toBe(expected);
         });
+
+        it('followRenames surfaces history from before a rename for a file', async () => {
+            const renamedFile = 'src/services/authentication.ts';
+            const withoutFollow = await git.getLog(repo.repoRoot, renamedFile, 0, 500, undefined, undefined, false);
+            const withFollow = await git.getLog(repo.repoRoot, renamedFile, 0, 500, undefined, undefined, true);
+            expect(withFollow.length).toBeGreaterThan(withoutFollow.length);
+
+            const expected = rawGit(['log', '--oneline', '--follow', '--', renamedFile]).split('\n').filter(Boolean).length;
+            expect(withFollow.length).toBe(expected);
+        });
+
+        it('followRenames is a no-op for directories', async () => {
+            const dir = 'src/services';
+            const withoutFollow = await git.getLog(repo.repoRoot, dir, 0, 500, undefined, undefined, false);
+            const withFollow = await git.getLog(repo.repoRoot, dir, 0, 500, undefined, undefined, true);
+            expect(withFollow.length).toBe(withoutFollow.length);
+        });
     });
 
     describe('date filtering', () => {
