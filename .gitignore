@@ -3,3 +3,4 @@ dist/
 coverage/
 *.vsix
 _releases/
+demo/output/extension-coverage/
