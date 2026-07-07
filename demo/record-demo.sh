@@ -22,10 +22,31 @@
 # docker and the VS Code CLI are left alone since installing those is a
 # bigger, more invasive decision than this script should make on its own.
 #
-# Usage: ./record-demo.sh [path-to-demo-repo] [target-file-in-repo]
+# Usage: ./record-demo.sh [--coverage] [path-to-demo-repo] [target-file-in-repo]
 # Defaults to ~/Downloads/vscode-demo and package.json.
+#
+# --coverage: also capture V8 code coverage of the extension-host process
+# (extension.ts, gitLogPanel.ts, gitService.ts, messageHandler.ts,
+# diffDocProvider.ts - everything that runs in dist/extension.js) while this
+# same click-through session plays out, and write a report to
+# demo/output/extension-coverage/. This does NOT cover webview/main.ts - the
+# webview runs in a separate browser context that NODE_V8_COVERAGE can't see
+# (and it's already covered by the unit test suite). There are no
+# assertions here; it only answers "did this code path actually run",
+# which is exactly the class of bug (dead/unwired code, stale dist/) that
+# mocked unit tests can't catch.
 
 set -euo pipefail
+
+COVERAGE=0
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --coverage) COVERAGE=1 ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 # Installs the lightweight CLI tools this script drives (xdotool, ffmpeg,
 # wmctrl, fontconfig for fc-match) if they're missing. Only targets apt
@@ -70,6 +91,9 @@ TARGET_FILE="${2:-package.json}"
 WORK="$(mktemp -d)"
 OUT_DIR="$SCRIPT_DIR/output"
 mkdir -p "$OUT_DIR"
+COVERAGE_DIR="$WORK/v8-coverage"
+COVERAGE_OUT_DIR="$SCRIPT_DIR/output/extension-coverage"
+[ "$COVERAGE" -eq 1 ] && mkdir -p "$COVERAGE_DIR"
 
 source "$SCRIPT_DIR/winsafe.sh"
 
@@ -141,6 +165,85 @@ stop_capture() {
     sleep 0.3
 }
 
+# Quits the isolated instance gracefully (Ctrl+Q) rather than killing it, so
+# the extension host process exits normally and Node actually flushes its
+# NODE_V8_COVERAGE data - a killed process may not. Waits up to 15s for it
+# to exit on its own; the usual cleanup() trap remains as the fallback if it
+# doesn't. Then renders a report from whatever coverage-*.json files landed
+# in COVERAGE_DIR.
+finalize_coverage() {
+    echo "=== Coverage: quitting isolated instance to flush V8 coverage ==="
+    activate_demo_window
+    # The preceding segment can leave keyboard focus inside one of our
+    # webview panels (an iframe), which silently swallows global keybindings
+    # sent via xdotool key - see demo_closetab's comment on the same issue
+    # with Ctrl+W. Click the Explorer activity-bar icon first to move focus
+    # back to native UI chrome before sending Ctrl+Q.
+    xdotool mousemove --window "$DEMO_WIN" 36 83
+    xdotool click 1
+    sleep 0.5
+    activate_demo_window
+    xdotool key --window "$DEMO_WIN" ctrl+q
+
+    # Poll the window marker, not $DEMO_PID - the code CLI forks (see
+    # cleanup()'s own comment on this), so the PID we captured at launch may
+    # already be gone long before the real window/extension host actually
+    # exits.
+    local waited=0
+    while [ -n "$(xdotool search --name "$MARKER" 2>/dev/null || true)" ] && [ "$waited" -lt 15 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if [ -n "$(xdotool search --name "$MARKER" 2>/dev/null || true)" ]; then
+        echo "WARNING: instance window still present after 15s; coverage may be incomplete or missing" >&2
+    fi
+    # Give the extension host process a moment to actually exit and flush
+    # coverage to disk after the window itself disappears.
+    sleep 2
+
+    if ! ls "$COVERAGE_DIR"/coverage-*.json >/dev/null 2>&1; then
+        echo "WARNING: no V8 coverage files were written to $COVERAGE_DIR - skipping report" >&2
+        return
+    fi
+
+    # VS Code runs the extension from its EXTRACTED vsix copy inside the
+    # throwaway profile's --extensions-dir, not from $EXT_DIR/dist directly -
+    # the coverage JSON records that absolute runtime path, so --include has
+    # to target it exactly rather than assume it matches $EXT_DIR/dist/extension.js.
+    local installed_js
+    installed_js="$(find "$WORK/profile-extensions" -path '*/dist/extension.js' -print -quit 2>/dev/null || true)"
+    if [ -z "$installed_js" ]; then
+        echo "WARNING: couldn't find the installed extension.js under $WORK/profile-extensions - skipping report" >&2
+        return
+    fi
+
+    echo "=== Coverage: generating report ==="
+    mkdir -p "$COVERAGE_OUT_DIR"
+    local installed_dir
+    installed_dir="$(dirname "$installed_js")"
+    # c8 (via test-exclude/minimatch) resolves --include relative to cwd, and
+    # doesn't cope with the resulting "../../../tmp/..." when cwd (EXT_DIR)
+    # and the coverage target (under WORK, a separate /tmp dir) share no
+    # common ancestor short of "/" - it silently matches nothing. Running
+    # with cwd set to the target file's own directory and matching by bare
+    # filename sidesteps that entirely. Mounted at their real host paths
+    # (not remapped to /workspace like the build step above) so those
+    # absolute paths resolve identically here to how they did at capture
+    # time. c8 is invoked by its installed path, not `npx c8`, because npx's
+    # lookup wouldn't find it from a cwd with no node_modules ancestor of
+    # its own (WORK) and would otherwise silently fetch it from the
+    # registry instead of using the pinned devDependency version.
+    sudo docker run --rm \
+        -v "$COVERAGE_DIR:$COVERAGE_DIR" \
+        -v "$WORK:$WORK" \
+        -v "$EXT_DIR:$EXT_DIR" \
+        node:20-slim sh -c \
+        "cd '$EXT_DIR' && npm install --silent 2>&1 | tail -3 && cd '$installed_dir' && '$EXT_DIR/node_modules/.bin/c8' report --temp-directory='$COVERAGE_DIR' --reporter=text --reporter=lcov --report-dir='$COVERAGE_OUT_DIR' --include=extension.js" \
+        2>&1 | tail -40
+    sudo chown -R "$(id -u):$(id -g)" "$COVERAGE_OUT_DIR"
+    echo "Coverage report: $COVERAGE_OUT_DIR/lcov-report/index.html and $COVERAGE_OUT_DIR/lcov.info"
+}
+
 echo "=== 1. Building fresh vsix ==="
 rm -f "$EXT_DIR"/*.vsix
 sudo docker run --rm -v "$EXT_DIR:/workspace" -w /workspace node:20-slim sh -c \
@@ -157,6 +260,13 @@ code --user-data-dir="$WORK/profile-user-data" \
      --install-extension "$WORK/demo-build.vsix" >/dev/null 2>&1
 
 echo "=== 3. Launching isolated instance ==="
+# NODE_V8_COVERAGE is honored by any Node process that has it set at start,
+# including the extension host VS Code forks as a child process - Node
+# writes one coverage-*.json per isolate to this directory automatically on
+# clean process exit, no code changes needed in the extension itself.
+if [ "$COVERAGE" -eq 1 ]; then
+    export NODE_V8_COVERAGE="$COVERAGE_DIR"
+fi
 nohup code --user-data-dir="$WORK/profile-user-data" \
      --extensions-dir="$WORK/profile-extensions" \
      --new-window \
@@ -245,7 +355,7 @@ demo_ctrlclick 700 "$(row_y 9)"
 sleep 0.6
 demo_mousemove 700 "$(row_y 9)"
 demo_click 3
-sleep 0.8
+sleep 1.2
 demo_mousemove 857 461
 demo_click 1
 sleep 2.5
@@ -268,8 +378,11 @@ add_title "Compare a revision with your Working Tree"
 start_capture
 demo_mousemove 700 888
 demo_click 3
-sleep 0.8
-demo_mousemove 856 983
+sleep 1.2
+# y=941 is "Compare with Working Tree" in the file context menu (measured
+# directly via screenshot - the menu shrank by ~42px at some point, this
+# used to be y=983 which now lands one item down, on "Blame").
+demo_mousemove 856 941
 demo_click 1
 sleep 2.2
 demo_key ctrl+w
@@ -281,8 +394,10 @@ add_title "Right-click a file, then Blame"
 start_capture
 demo_mousemove 700 888
 demo_click 3
-sleep 0.8
-demo_mousemove 858 1025
+sleep 1.2
+# y=982 is "Blame" in the file context menu (see the same note on segment
+# 5's y=941 - this used to be y=1025, which now lands on "Copy Path").
+demo_mousemove 858 982
 demo_click 1
 sleep 1.5
 demo_mousemove 600 863
@@ -308,7 +423,7 @@ demo_scroll 250 300 8 4
 sleep 0.4
 demo_mousemove 140 587
 demo_click 3
-sleep 0.8
+sleep 1.2
 demo_mousemove 247 1115
 demo_click 1
 sleep 2.5
@@ -327,7 +442,7 @@ demo_ctrlclick 700 "$(row_y 3)"
 sleep 0.6
 demo_mousemove 700 "$(row_y 3)"
 demo_click 3
-sleep 0.8
+sleep 1.2
 demo_mousemove 857 279
 demo_click 1
 sleep 2.5
@@ -360,7 +475,7 @@ add_title "Right-click to clear all filters"
 start_capture
 demo_mousemove 700 192
 demo_click 3
-sleep 0.8
+sleep 1.2
 demo_mousemove 785 233
 demo_click 1
 sleep 1.8
@@ -381,6 +496,30 @@ demo_click 1
 demo_type "skills"
 sleep 1.8
 stop_capture
+
+# --- Segment 12: also reachable from the Source Control view ---
+# The previous segment ends with keyboard focus inside our webview's filter
+# input (an iframe), which can silently swallow global keybindings sent via
+# xdotool key (see demo_closetab's comment on the same issue with Ctrl+W) -
+# so switch views by clicking the Activity Bar icon rather than sending
+# Ctrl+Shift+G. The throwaway edit from step 4 is still the one changed file
+# shown under Source Control > Changes.
+add_title "Also available from the Source Control view"
+start_capture
+demo_mousemove 36 233
+demo_click 1
+sleep 1
+demo_mousemove 200 296
+demo_click 3
+sleep 1.2
+demo_mousemove 305 673
+demo_click 1
+sleep 2
+stop_capture
+
+if [ "$COVERAGE" -eq 1 ]; then
+    finalize_coverage
+fi
 
 echo "=== 6. Concatenating ${#CLIPS[@]} clips ==="
 CONCAT_LIST="$WORK/concat.txt"

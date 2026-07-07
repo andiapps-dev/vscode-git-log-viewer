@@ -4,7 +4,7 @@ Scripts to record a short animated-GIF demo of the extension's features, so
 re-recording after UI changes is a rerun instead of a manual capture.
 
 ```
-./record-demo.sh [path-to-demo-repo] [target-file-in-repo]
+./record-demo.sh [--coverage] [path-to-demo-repo] [target-file-in-repo]
 ```
 
 Defaults to `~/Downloads/vscode-demo` and `package.json`. The target repo
@@ -33,6 +33,28 @@ produce a thin or squashed history that doesn't show off filtering well).
 the top-level README, so it needs to actually exist in the repo (not be
 gitignored) for GitHub/Marketplace to render it. Re-run the script and
 commit the new file to update it.
+
+## `--coverage`
+
+Also captures real V8 code coverage of the extension-host process (
+`extension.ts`, `gitLogPanel.ts`, `gitService.ts`, `messageHandler.ts`,
+`diffDocProvider.ts` - everything bundled into `dist/extension.js`) during
+this same click-through session, via `NODE_V8_COVERAGE`. A report is written
+to `output/extension-coverage/` (gitignored - it's a diagnostic artifact,
+not something to commit like the GIF).
+
+This isn't a substitute for `npm test`'s unit tests: there are no
+assertions, it only tells you *which lines executed* while the scripted
+walkthrough played out - which is exactly the class of bug (dead/unwired
+code, a stale `dist/` that doesn't match `src/`) that mocked unit tests
+can't catch, since they never run the real, wired-together extension. It
+also can't see `webview/main.ts` at all - the webview runs in a separate
+Chromium context that `NODE_V8_COVERAGE` has no visibility into (that file
+is covered by the unit test suite instead, via jsdom).
+
+The isolated instance is quit gracefully (Ctrl+Q, not killed) at the end of
+the session so Node actually flushes its coverage data before the process
+exits - a killed process may not.
 
 ## Requires
 
