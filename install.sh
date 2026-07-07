@@ -17,12 +17,20 @@ sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -
       const pkg = JSON.parse(require(\"fs\").readFileSync(\"package.json\",\"utf8\"));
       pkg.name = \"git-log-viewer-dev\";
       pkg.displayName = \"Git Log Viewer (Dev)\";
-      pkg.contributes.commands[0].command = \"gitLogViewerDev.showLog\";
-      pkg.contributes.commands[0].title = \"Show Git Log (Dev)\";
-      pkg.contributes.menus[\"explorer/context\"][0].command = \"gitLogViewerDev.showLog\";
-      pkg.contributes.menus[\"editor/context\"][0].command = \"gitLogViewerDev.showLog\";
-      pkg.contributes.menus.commandPalette[0].command = \"gitLogViewerDev.showLog\";
-      pkg.contributes.keybindings[0].command = \"gitLogViewerDev.showLog\";
+      for (const cmd of pkg.contributes.commands) {
+        if (cmd.command === \"gitLogViewer.showLog\") {
+          cmd.command = \"gitLogViewerDev.showLog\";
+          cmd.title = \"Show Git Log (Dev)\";
+        }
+      }
+      for (const entries of Object.values(pkg.contributes.menus)) {
+        for (const entry of entries) {
+          if (entry.command === \"gitLogViewer.showLog\") entry.command = \"gitLogViewerDev.showLog\";
+        }
+      }
+      for (const kb of pkg.contributes.keybindings) {
+        if (kb.command === \"gitLogViewer.showLog\") kb.command = \"gitLogViewerDev.showLog\";
+      }
       require(\"fs\").writeFileSync(\"package.json\", JSON.stringify(pkg, null, 2));
     "
 

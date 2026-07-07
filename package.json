@@ -42,6 +42,20 @@
           "when": "config.git.enabled && gitOpenRepositoryCount != 0 && resourceScheme == file"
         }
       ],
+      "scm/resourceState/context": [
+        {
+          "command": "gitLogViewer.showLog",
+          "group": "zzz_gitLogViewer",
+          "when": "scmProvider == git"
+        }
+      ],
+      "scm/resourceFolder/context": [
+        {
+          "command": "gitLogViewer.showLog",
+          "group": "zzz_gitLogViewer",
+          "when": "scmProvider == git"
+        }
+      ],
       "commandPalette": [
         {
           "command": "gitLogViewer.showLog",

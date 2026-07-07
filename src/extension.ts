@@ -7,8 +7,9 @@ export function activate(context: vscode.ExtensionContext) {
     const gitService = new GitService();
     const diffProvider = new DiffDocProvider(gitService);
 
-    const handler = (uri?: vscode.Uri) => {
-        const target = uri || vscode.window.activeTextEditor?.document.uri;
+    const handler = (arg?: vscode.Uri | { resourceUri?: vscode.Uri }) => {
+        const target = (arg instanceof vscode.Uri ? arg : arg?.resourceUri)
+            || vscode.window.activeTextEditor?.document.uri;
         if (!target) {
             return;
         }
