@@ -12,24 +12,30 @@ sudo rm -rf "$SCRIPT_DIR/node_modules" "$SCRIPT_DIR/dist"
 echo "Building DEV extension in Docker..."
 sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -c '
     cp package.json package.json.bak
+    cp package-lock.json package-lock.json.bak
 
     node -e "
       const pkg = JSON.parse(require(\"fs\").readFileSync(\"package.json\",\"utf8\"));
       pkg.name = \"git-log-viewer-dev\";
       pkg.displayName = \"Git Log Viewer (Dev)\";
+      // Prefix match (not a hardcoded gitLogViewer.showLog string) so any
+      // future gitLogViewer.* command is renamed automatically instead of
+      // silently colliding with the real extension when both are installed
+      // side by side - this is what broke for gitLogViewer.showLineHistory.
+      const rename = (id) => id.startsWith(\"gitLogViewer.\") ? id.replace(/^gitLogViewer\\./, \"gitLogViewerDev.\") : id;
       for (const cmd of pkg.contributes.commands) {
-        if (cmd.command === \"gitLogViewer.showLog\") {
-          cmd.command = \"gitLogViewerDev.showLog\";
-          cmd.title = \"Show Git Log (Dev)\";
+        if (cmd.command.startsWith(\"gitLogViewer.\")) {
+          cmd.command = rename(cmd.command);
+          cmd.title = cmd.title + \" (Dev)\";
         }
       }
       for (const entries of Object.values(pkg.contributes.menus)) {
         for (const entry of entries) {
-          if (entry.command === \"gitLogViewer.showLog\") entry.command = \"gitLogViewerDev.showLog\";
+          entry.command = rename(entry.command);
         }
       }
       for (const kb of pkg.contributes.keybindings) {
-        if (kb.command === \"gitLogViewer.showLog\") kb.command = \"gitLogViewerDev.showLog\";
+        kb.command = rename(kb.command);
       }
       require(\"fs\").writeFileSync(\"package.json\", JSON.stringify(pkg, null, 2));
     "
@@ -39,6 +45,7 @@ sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -
     && npx @vscode/vsce package --allow-missing-repository 2>&1
 
     mv package.json.bak package.json
+    mv package-lock.json.bak package-lock.json
 '
 
 # Fix ownership of build output
