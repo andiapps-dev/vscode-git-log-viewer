@@ -1,0 +1,62 @@
+name: Release
+
+# Tag push only — not every push to main. A plain merge to main just
+# runs build.yml (the CI gate); nothing gets released until an actual
+# vX.Y.Z tag lands, so a GitHub Release only gets created once per
+# version, and it's always built from a tag whose package.json version
+# matches (github-push.sh enforces that before it ever pushes the tag).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  # Re-runs the same build/lint/test/package gate as build.yml (via
+  # workflow_call) so a release can't publish a .vsix that wouldn't
+  # have passed CI, and produces the "vsix" artifact this job reuses
+  # below instead of building it a second time.
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      # generate_release_notes alone only produces GitHub's own
+      # auto-generated commit/PR list — it never reads CHANGELOG.md, so
+      # the curated notes maintained there never showed up on the
+      # release page. Extract this tag's own section (everything between
+      # its "## [x.y.z]" heading and the next "## [" heading) and use
+      # that as the release body instead; generate_release_notes stays
+      # on so GitHub appends its commit list after it, as a supplement.
+      - name: Extract this version's CHANGELOG section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) { found=1; next }
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No CHANGELOG.md section found for [$version] — add one before tagging (see vscode-git-log-viewer-scripts/README.md)."
+            exit 1
+          fi
+
+      # No Marketplace publish here by design — download the .vsix from
+      # this release and upload it at marketplace.visualstudio.com/manage
+      # yourself. See vscode-git-log-viewer-scripts/README.md.
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: "*.vsix"
