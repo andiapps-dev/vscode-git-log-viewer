@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # npm dependencies (esbuild, vitest, vsce, types, ...)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Actions used by build.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
