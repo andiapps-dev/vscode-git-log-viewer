@@ -213,6 +213,26 @@ describe('compareWithPrevious', () => {
         const openDiff = (diffOpener.openDiff as ReturnType<typeof vi.fn>);
         expect(openDiff.mock.calls[0][0]).toBe(prevSha);
     });
+
+    it('falls back to comparing the commit against itself when there is no previous commit', async () => {
+        const { handler, diffOpener } = createHandler();
+        // Written once in the fixture and never touched again - genuinely
+        // has no previous commit, unlike relying on a file that merely
+        // looks like it might not.
+        const sha = repo.commits['revert-target-main'];
+
+        await handler.handle({
+            type: 'compareWithPrevious',
+            sha,
+            filePath: 'src/experimental/revert-target.ts',
+            status: 'A',
+        });
+
+        const openDiff = (diffOpener.openDiff as ReturnType<typeof vi.fn>);
+        const [leftSha, rightSha] = openDiff.mock.calls[0];
+        expect(leftSha).toBe(sha);
+        expect(rightSha).toBe(sha);
+    });
 });
 
 describe('compareWithWorkingTree', () => {
@@ -316,6 +336,13 @@ describe('compareFile', () => {
         expect(openDiff.mock.calls[0][0]).toBe(sha1);
         expect(openDiff.mock.calls[0][1]).toBe(sha2);
     });
+
+    it('does nothing when sha1/sha2 are missing from state', async () => {
+        const { handler, diffOpener } = createHandler({ mode: 'compare' });
+        await handler.handle({ type: 'compareFile', filePath: 'a.ts', status: 'M' });
+
+        expect(diffOpener.openDiff).not.toHaveBeenCalled();
+    });
 });
 
 describe('showFileLog', () => {
@@ -395,6 +422,19 @@ describe('revertCommit', () => {
         expect(gitActions.revertCommit).toHaveBeenCalledWith('def456');
         expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
     });
+
+    it('does not post gitActionCompleted when it fails', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn().mockResolvedValue(false),
+            createBranch: vi.fn(),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'revertCommit', sha: 'def456' });
+
+        expect(sender.postMessage).not.toHaveBeenCalled();
+    });
 });
 
 describe('createBranch', () => {
@@ -440,6 +480,19 @@ describe('createTag', () => {
         expect(gitActions.createTag).toHaveBeenCalledWith('bbb222');
         expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
     });
+
+    it('does not post gitActionCompleted when the input box is cancelled', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn(),
+            createTag: vi.fn().mockResolvedValue(false),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'createTag', sha: 'bbb222' });
+
+        expect(sender.postMessage).not.toHaveBeenCalled();
+    });
 });
 
 describe('error handling', () => {
@@ -455,5 +508,34 @@ describe('error handling', () => {
         const msg = post.mock.calls[0][0];
         expect(msg.type).toBe('error');
         expect(msg.message.length).toBeGreaterThan(0);
+    });
+
+    it('stringifies a non-Error thrown value rather than reading .message off it', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn().mockRejectedValue('a plain string rejection, not an Error'),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn(),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.type).toBe('error');
+        expect(msg.message).toBe('a plain string rejection, not an Error');
+    });
+
+    it('degrades to a handled error rather than throwing when initialState has no target path', async () => {
+        const { handler, sender } = createHandler({ targetPath: undefined });
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 5 });
+
+        // targetPath falls back to '' (exercising that branch), which
+        // path.relative resolves against process.cwd() rather than the
+        // fixture repo root - not a valid pathspec there, so git legitimately
+        // errors. The point of this test is that it errors *gracefully*
+        // (caught and posted, not an unhandled rejection), not what path
+        // it resolves to.
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.type).toBe('error');
     });
 });

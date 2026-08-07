@@ -151,12 +151,55 @@ export interface InitialStateInput {
     pageSize?: number;
 }
 
+// main.ts registers a handful of listeners directly on `window`/`document` at
+// module top level (message handling, global Escape/outside-click dismissal,
+// drag handlers, ...), and jsdom's window/document - unlike document.body,
+// which loadWebview replaces wholesale via innerHTML - persist across
+// loadWebview() calls within the same test file. vi.resetModules() only
+// affects vitest's own module registry (so a fresh `import()` does get a
+// module instance with fresh top-level `let` state, confirmed directly), but
+// it can't and doesn't know to call cleanup on whatever the *previous*
+// instance registered on window/document - nothing does that automatically.
+// Left alone, every previous test's listeners stay live and keep firing
+// (each with its own stale closure state) on top of the current test's,
+// which silently produces cross-test contamination without necessarily
+// tripping an assertion in most tests - until two tests happen to touch the
+// same sha/id in a way that makes a stale handler's side effect visible.
+// Track every window/document listener main.ts registers and strip them
+// all before each fresh load, so only the current instance's are ever live.
+let trackedListeners: Array<{ target: EventTarget; type: string; listener: EventListenerOrEventListenerObject }> = [];
+
+function trackListenersOn(target: EventTarget): void {
+    const original = target.addEventListener.bind(target);
+    target.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+        trackedListeners.push({ target, type, listener });
+        return original(type, listener, options);
+    }) as typeof target.addEventListener;
+}
+
+let listenersTracked = false;
+
 /**
  * Resets the DOM + module registry, injects a fresh mocked VS Code webview
  * API and initialState, then imports webview/main.ts (which runs its
  * top-level setup and initial postMessage as a side effect of import).
  */
 export async function loadWebview(initialState: InitialStateInput): Promise<{ api: MockVsCodeApi }> {
+    // Strip every window/document listener the *previous* loadWebview's
+    // main.ts instance registered, before anything about this call begins.
+    for (const { target, type, listener } of trackedListeners) {
+        target.removeEventListener(type, listener);
+    }
+    trackedListeners = [];
+    if (!listenersTracked) {
+        // Only need to wrap addEventListener once - it stays wrapped (and
+        // keeps appending to trackedListeners, which we drain above) across
+        // every subsequent loadWebview() call in the file.
+        trackListenersOn(window);
+        trackListenersOn(document);
+        listenersTracked = true;
+    }
+
     vi.resetModules();
 
     const body = initialState.mode === 'compare' ? COMPARE_BODY

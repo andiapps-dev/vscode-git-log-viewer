@@ -79,6 +79,23 @@ describe('blame mode', () => {
         expect(info.textContent).toContain('Hover over a revision');
     });
 
+    it('hovering/clicking a code-panel row (not just the gutter) also highlights and locks', async () => {
+        await loadWebview({ mode: 'blame', blameSha: 'sha1', blameFilePath: 'a.ts' });
+        sendFromExtension({
+            type: 'blameDataLoaded',
+            lines: [line({ lineNo: 1, sha: 'sha1' })],
+            commits: { sha1: detail({ hash: 'sha1', body: 'Fix bug' }) },
+        });
+
+        const codeRow = document.querySelector('#blame-code-tbody tr.blame-row')!;
+        codeRow.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        expect(codeRow.classList.contains('blame-highlight')).toBe(true);
+
+        codeRow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const info = document.getElementById('blame-commit-info')!;
+        expect(info.textContent).toContain('Fix bug');
+    });
+
     it('ignores hover while a different row is locked', async () => {
         await loadWebview({ mode: 'blame', blameSha: 'sha1', blameFilePath: 'a.ts' });
         sendFromExtension({

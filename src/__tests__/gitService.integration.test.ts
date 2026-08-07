@@ -360,6 +360,15 @@ describe('getCommitFiles', () => {
             expect(files.some(f => f.parentGroup !== undefined)).toBe(true);
         });
     });
+
+    it('rejects for a sha that does not resolve to any commit', async () => {
+        // git rev-parse <sha>^@ itself fails for a genuinely unresolvable
+        // sha (as opposed to a valid root commit, where it succeeds with
+        // empty output) - exercises the .catch(() => '') fallback, which
+        // then falls through to the single-parent diff-tree path with the
+        // same bad sha, which fails too.
+        await expect(git.getCommitFiles(repo.repoRoot, 'not-a-real-sha')).rejects.toThrow();
+    });
 });
 
 describe('getFileAtRevision', () => {
@@ -384,6 +393,17 @@ describe('getFileAtRevision', () => {
     it('returns empty string for bad revision', async () => {
         const content = await git.getFileAtRevision(repo.repoRoot, 'deadbeef' + '0'.repeat(32), 'src/components/footer.ts');
         expect(content).toBe('');
+    });
+
+    it('rethrows for an error that does not match any known "missing" message', async () => {
+        // A non-hex, unresolvable revision string produces git's "invalid
+        // object name" message, which matches none of the three substrings
+        // getFileAtRevision treats as "missing" - unlike a same-length hex
+        // string, which git resolves far enough to report "does not exist
+        // in" instead. Exercises the final rethrow rather than swallowing.
+        await expect(
+            git.getFileAtRevision(repo.repoRoot, 'not-a-real-sha', 'src/components/footer.ts'),
+        ).rejects.toThrow(/invalid object name/);
     });
 });
 
@@ -419,23 +439,27 @@ describe('getPreviousFileCommit', () => {
     it('returns previous commit for a file with multiple changes', async () => {
         const file = 'src/components/footer.ts';
         const allFileCommits = rawGit(['log', '--format=%H', '--', file]).split('\n').filter(Boolean);
-        if (allFileCommits.length >= 2) {
-            const current = allFileCommits[0];
-            const expected = allFileCommits[1];
-            const result = await git.getPreviousFileCommit(repo.repoRoot, current, file);
-            expect(result).toBe(expected);
-        }
+        // Asserted rather than used as a runtime guard: this file is touched
+        // repeatedly throughout the fixture's construction, and a silent
+        // no-op here (from a conditional this test used to have) is exactly
+        // what let the >= 2 branch go untested once the assumption it
+        // guarded stopped holding for a *different* file elsewhere.
+        expect(allFileCommits.length).toBeGreaterThanOrEqual(2);
+        const [current, expected] = allFileCommits;
+        const result = await git.getPreviousFileCommit(repo.repoRoot, current, file);
+        expect(result).toBe(expected);
     });
 
-    it('returns null for file with only one commit', async () => {
-        // Find a file that was only touched once
-        const file = 'assets/icon.svg';
+    it('returns null for a file with only one commit', async () => {
+        // Written once in the fixture (Phase 22) and never touched again -
+        // deterministically single-commit, unlike a file picked by querying
+        // "whatever happens to have count 1 right now".
+        const file = 'src/experimental/revert-target.ts';
         const count = parseInt(rawGit(['rev-list', '--count', 'HEAD', '--', file]), 10);
-        if (count === 1) {
-            const sha = rawGit(['log', '--format=%H', '-1', '--', file]);
-            const result = await git.getPreviousFileCommit(repo.repoRoot, sha, file);
-            expect(result).toBeNull();
-        }
+        expect(count).toBe(1);
+        const sha = repo.commits['revert-target-main'];
+        const result = await git.getPreviousFileCommit(repo.repoRoot, sha, file);
+        expect(result).toBeNull();
     });
 });
 
