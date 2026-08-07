@@ -160,6 +160,18 @@ export function createFixtureRepo(): FixtureRepo {
     git(['init', '-b', 'main'], repoRoot);
     git(['config', 'user.name', 'Test'], repoRoot);
     git(['config', 'user.email', 'test@test.com'], repoRoot);
+    // This repo racks up hundreds of loose objects fast (many commits,
+    // several with --allow-empty, across many branches). Past a threshold
+    // git auto-triggers `gc --auto` in a *detached background process* on
+    // an ordinary commit/merge - if that background gc repacks/prunes loose
+    // objects while a later git command in this same build is still
+    // reading them, the read loses the race: "error: Could not read <sha>"
+    // / "could not parse commit <sha>", intermittently, on whichever
+    // machine happens to be slow enough for the two to overlap (reproduced
+    // on GitHub-hosted CI runners; never locally). These repos are
+    // throwaway and deleted at the end of the test file, so packfile
+    // optimization buys nothing - just disable auto-gc entirely.
+    git(['config', 'gc.auto', '0'], repoRoot);
 
     for (const dir of DIRS) {
         fs.mkdirSync(path.join(repoRoot, dir), { recursive: true });

@@ -26,7 +26,7 @@ export default defineConfig({
     },
     resolve: {
         alias: {
-            '../../webview': path.resolve(__dirname, 'webview'),
+            '../../webview': path.resolve(import.meta.dirname, 'webview'),
         },
     },
 });
