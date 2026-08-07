@@ -152,6 +152,17 @@ describe('parseStatusAndNumstat', () => {
         const result = parseStatusAndNumstat('', '');
         expect(result).toEqual([]);
     });
+
+    it('falls back to status M for a file present in numstat but missing from status', () => {
+        // Defensive fallback for the two outputs disagreeing - shouldn't
+        // happen with real git output, but the parser shouldn't throw or
+        // drop the file if it does.
+        const statusOut = '';
+        const numstatOut = '5\t2\tsrc/orphan.ts';
+
+        const result = parseStatusAndNumstat(statusOut, numstatOut);
+        expect(result).toEqual([{ path: 'src/orphan.ts', oldPath: undefined, status: 'M', additions: 5, deletions: 2 }]);
+    });
 });
 
 describe('parseBlameOutput', () => {

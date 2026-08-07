@@ -249,6 +249,25 @@ describe('log mode: filtering', () => {
         expect(row2.classList.contains('filtered-out')).toBe(true);
     });
 
+    it('clicking into a filter input does not bubble up and dismiss an open context menu', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('commit-context-menu')?.style.display).toBe('block');
+
+        const textFilter = document.querySelector<HTMLInputElement>('#commit-table input[data-col="subject"]')!;
+        click(textFilter);
+        expect(document.getElementById('commit-context-menu')?.style.display).toBe('block');
+
+        const dateInputs = document.querySelectorAll<HTMLInputElement>('#commit-table input[type="date"]');
+        const fromInput = dateInputs[0];
+        const toInput = dateInputs[1];
+        click(fromInput);
+        click(toInput);
+        expect(document.getElementById('commit-context-menu')?.style.display).toBe('block');
+    });
+
     it('reloads commits with server-side date range when a date filter changes', async () => {
         const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
         sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
@@ -338,6 +357,29 @@ describe('log mode: clear filters', () => {
         expect(authorTh.querySelector('.sort-arrow')?.textContent).toBe('');
         expect(api.postMessage).toHaveBeenCalledWith({ type: 'requestCommits', offset: 0, count: 100 });
     });
+
+    it('clears an active date-range filter too, not just text filters', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        const dateInputs = document.querySelectorAll<HTMLInputElement>('#commit-table input[type="date"]');
+        const fromInput = dateInputs[0];
+        const toInput = dateInputs[1];
+        fromInput.value = '2024-01-01';
+        fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+        toInput.value = '2024-06-30';
+        toInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-commit-clear-filters')!);
+
+        expect(fromInput.value).toBe('');
+        expect(toInput.value).toBe('');
+        // A subsequent reload shouldn't carry the cleared date range along.
+        const lastCall = api.postMessage.mock.calls[api.postMessage.mock.calls.length - 1][0];
+        expect(lastCall.after).toBeUndefined();
+        expect(lastCall.before).toBeUndefined();
+    });
 });
 
 describe('log mode: commit selection', () => {
@@ -399,6 +441,25 @@ describe('log mode: file context menu actions', () => {
         }));
     });
 
+    it('sends compareWithPrevious with no previousSha when the selected commit is the last row', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        sendFromExtension({
+            type: 'commitDetailsLoaded',
+            detail: { hash: 'h1', shortHash: 'h1', authorName: 'A', authorEmail: 'a', authorDate: '2024-01-01', body: '' },
+            files: [file({ path: 'a.ts', status: 'M' })],
+        });
+        api.postMessage.mockClear();
+        rightClick(document.querySelector('#files-tbody tr.data-row')!);
+        click(document.getElementById('ctx-compare')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'compareWithPrevious',
+            sha: 'h1',
+            previousSha: undefined,
+        }));
+    });
+
     it('sends compareWithWorkingTree', async () => {
         const { api } = await setupWithSelectedFile();
         click(document.getElementById('ctx-compare-working')!);
@@ -453,6 +514,21 @@ describe('log mode: file context menu actions', () => {
         expect(document.getElementById('ctx-compare')?.style.display).toBe('none');
         expect(document.getElementById('ctx-show-file-log')?.style.display).toBe('none');
         expect(document.getElementById('ctx-view-file-contents')?.style.display).toBe('none');
+    });
+
+    it('sends nothing when compare/compare-working/blame/view-contents are clicked with no context file', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [], hasMore: false });
+        rightClick(document.getElementById('files-changed-panel')!);
+
+        api.postMessage.mockClear();
+        for (const id of ['ctx-compare', 'ctx-compare-working', 'ctx-blame', 'ctx-view-file-contents']) {
+            click(document.getElementById(id)!);
+        }
+
+        for (const type of ['compareWithPrevious', 'compareWithWorkingTree', 'blame', 'viewFileContents']) {
+            expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type }));
+        }
     });
 });
 
@@ -531,11 +607,33 @@ describe('log mode: folder view toggle', () => {
 
         expect(document.querySelector('#files-tbody .col-path')?.textContent).toBe('name.ts → name.ts');
     });
+
+    it('composes folder view with merge-commit parent groups: nests directory under parent group', async () => {
+        await loadWithFiles([
+            file({ path: 'src/a.ts', parentGroup: 'Diff with parent 1: abc12345' }),
+            file({ path: 'src/nested/b.ts', parentGroup: 'Diff with parent 1: abc12345' }),
+        ]);
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        const headers = Array.from(document.querySelectorAll('#files-tbody .group-header')).map(el => el.textContent);
+        expect(headers).toEqual(['Diff with parent 1: abc12345 — src', 'Diff with parent 1: abc12345 — src/nested']);
+    });
 });
 
 describe('log mode: commit context menu', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+    });
+
+    it('opens via right-clicking a commit row directly, not just empty panel space', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        const row = document.querySelector('#commit-tbody tr[data-sha="h1"]')!;
+        rightClick(row);
+
+        expect(document.getElementById('commit-context-menu')?.style.display).toBe('block');
     });
 
     it('sends compareRevisions with older/newer shas resolved from row order', async () => {
@@ -557,6 +655,39 @@ describe('log mode: commit context menu', () => {
         click(document.getElementById('ctx-compare-revisions')!);
 
         expect(api.postMessage).toHaveBeenCalledWith({ type: 'compareRevisions', sha1: 'older', sha2: 'newer' });
+    });
+
+    it('still resolves older/newer correctly when the older commit is selected first', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'newer' }), commit({ hash: 'older' })],
+            hasMore: false,
+        });
+
+        // Reversed from the test above: select "older" (row 1) first with a
+        // plain click, then ctrl-click "newer" (row 0) second - selection
+        // order no longer matches row order.
+        const rowOlder = document.querySelector('#commit-tbody tr[data-sha="older"]')!;
+        click(rowOlder);
+        const rowNewer = document.querySelector('#commit-tbody tr[data-sha="newer"]')!;
+        click(rowNewer, { ctrlKey: true });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-compare-revisions')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'compareRevisions', sha1: 'older', sha2: 'newer' });
+    });
+
+    it('does nothing if Compare Selected Revisions is invoked without exactly 2 selected', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        click(document.getElementById('ctx-compare-revisions')!);
+
+        expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'compareRevisions' }));
     });
 
     it('hides "Compare Selected Revisions" unless exactly 2 commits are selected', async () => {
@@ -827,6 +958,26 @@ describe('log mode: git action commit context menu items', () => {
         }
     });
 
+    it('sends nothing for cherry-pick/revert/branch/tag when invoked without exactly one selected', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
+            hasMore: false,
+        });
+        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
+        click(row2, { ctrlKey: true }); // now 2 selected
+
+        api.postMessage.mockClear();
+        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
+            click(document.getElementById(id)!);
+        }
+
+        for (const type of ['cherryPick', 'revertCommit', 'createBranch', 'createTag']) {
+            expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type }));
+        }
+    });
+
     it('sends cherryPick with the selected sha', async () => {
         const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
         sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
@@ -994,6 +1145,34 @@ describe('log mode: branches submenu', () => {
 
         rightClick(document.getElementById('commit-list-panel')!);
         expect(document.getElementById('ctx-branches')?.style.display).toBe('none');
+    });
+
+    it('clicking "Branches" again while the submenu is already open closes it', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main']);
+        expect(document.getElementById('branches-submenu')?.style.display).toBe('block');
+
+        click(document.getElementById('ctx-branches')!);
+
+        expect(document.getElementById('branches-submenu')?.style.display).toBe('none');
+    });
+
+    it('clicking an already-selected branch deselects it', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main', 'feature/x']);
+
+        const mainItem = () => Array.from(document.querySelectorAll('#branches-submenu .context-menu-item')).find(el => el.textContent?.includes('main'))!;
+        click(mainItem()); // select
+        expect(mainItem().textContent).toBe('✓ main');
+
+        api.postMessage.mockClear();
+        click(mainItem()); // deselect
+
+        expect(mainItem().textContent).toBe('main');
+        const lastCall = api.postMessage.mock.calls[api.postMessage.mock.calls.length - 1][0];
+        expect(lastCall.branches).toBeUndefined();
     });
 });
 

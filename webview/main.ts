@@ -225,6 +225,16 @@ function showCommitContextMenu(e: MouseEvent): void {
     const createTagItem = document.getElementById('ctx-create-tag');
     const branchesItem = document.getElementById('ctx-branches');
 
+    // compareRevItem/cherryPickItem/revertItem/createBranchItem/createTagItem
+    // /branchesItem/commitClearFilters are all static siblings within the
+    // same log-mode-only #commit-context-menu template (see gitLogPanel.ts's
+    // getLogHtml) - this function only ever runs when that template is the
+    // one on the page (guarded by the !commitContextMenu check above), so
+    // they're always present together or not at all. The `if (xxxItem)`
+    // guards exist for TypeScript's strict-null-checks on getElementById's
+    // return type, not because any of them can actually be null here in
+    // practice - there's no realistic DOM state that isolates just one.
+    /* v8 ignore start */
     if (compareRevItem) {
         compareRevItem.style.display = selectedCommitShas.length === 2 ? '' : 'none';
     }
@@ -243,6 +253,7 @@ function showCommitContextMenu(e: MouseEvent): void {
     if (commitClearFilters) {
         commitClearFilters.style.display = '';
     }
+    /* v8 ignore stop */
 
     commitContextMenu.style.display = 'block';
     commitContextMenu.style.left = `${e.clientX}px`;
@@ -631,6 +642,12 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
             blameItem.style.display = '';
             if (viewContentsItem) viewContentsItem.style.display = canViewContents ? '' : 'none';
         } else {
+            // Unreachable in practice: this function is only ever invoked
+            // from file-row/files-panel listeners (see call sites below),
+            // and blame mode's HTML has neither, so state.mode is never
+            // 'blame' here. Left in defensively rather than assuming the
+            // call sites can never change.
+            /* v8 ignore next 4 */
             compareItem.style.display = 'none';
             compareWorkingItem.style.display = 'none';
             blameItem.style.display = 'none';
@@ -644,6 +661,10 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
         if (viewContentsItem) viewContentsItem.style.display = 'none';
     }
 
+    // ctx-copy-path/ctx-folder-view/ctx-clear-filters exist in both the log
+    // and compare templates that actually reach this function (see above) -
+    // same reasoning, the null case is blame-only and unreachable here.
+    /* v8 ignore start */
     const copyPathItem = document.getElementById('ctx-copy-path');
     if (copyPathItem) copyPathItem.style.display = file ? '' : 'none';
 
@@ -656,6 +677,7 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     if (clearFiltersItem) {
         clearFiltersItem.style.display = '';
     }
+    /* v8 ignore stop */
 
     const refreshItem = document.getElementById('ctx-refresh');
     const separator = contextMenu.querySelector('.context-menu-separator');
@@ -1176,7 +1198,13 @@ function applyFilters(autoSelect: boolean = true): void {
             ths.forEach((th, i) => {
                 const col = (th as HTMLElement).dataset.col || '';
                 if (dateColumns.includes(col)) {
-                    // In log mode, date filtering is handled server-side via --since/--until
+                    // In log mode, date filtering is handled server-side via --since/--until.
+                    // dateColumns is just ['authorDate'], and that column only ever exists on
+                    // the commit table, which only ever exists in log mode - so this branch
+                    // is unreachable with the current HTML templates. Left in as a guard
+                    // against future non-log tables gaining a date column, rather than
+                    // deleted, but that also means it can't be exercised by any real test.
+                    /* v8 ignore next 12 */
                     if (state.mode !== 'log') {
                         const rawDate = (cells[i] as HTMLElement)?.dataset.rawDate || '';
                         const cellDate = rawDate ? new Date(rawDate) : null;

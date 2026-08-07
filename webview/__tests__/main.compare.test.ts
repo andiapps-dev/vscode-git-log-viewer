@@ -54,6 +54,39 @@ describe('compare mode', () => {
         expect(paths).toEqual(['a.ts', 'b.ts']);
     });
 
+    it('shows a literal 0 rather than +0/-0 for a file with no additions or deletions', async () => {
+        await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        sendFromExtension({
+            type: 'compareFilesLoaded',
+            files: [file({ path: 'renamed-only.ts', additions: 0, deletions: 0 })],
+        });
+
+        expect(document.querySelector('#files-tbody .col-additions')?.textContent).toBe('0');
+        expect(document.querySelector('#files-tbody .col-deletions')?.textContent).toBe('0');
+    });
+
+    it('re-applies an active filter when the file list re-renders', async () => {
+        await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        sendFromExtension({
+            type: 'compareFilesLoaded',
+            files: [file({ path: 'a.ts' }), file({ path: 'b.ts' })],
+        });
+
+        const filterInput = document.querySelector<HTMLInputElement>('#files-table input[data-col="path"]')!;
+        filterInput.value = 'a';
+        filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(document.querySelector('#files-tbody tr[data-path="b.ts"]')?.classList.contains('filtered-out')).toBe(true);
+
+        // Re-sending the same data re-runs renderFiles() from scratch; the
+        // filter should still apply to the freshly rendered rows.
+        sendFromExtension({
+            type: 'compareFilesLoaded',
+            files: [file({ path: 'a.ts' }), file({ path: 'b.ts' })],
+        });
+        expect(document.querySelector('#files-tbody tr[data-path="b.ts"]')?.classList.contains('filtered-out')).toBe(true);
+        expect(document.querySelector('#files-tbody tr[data-path="a.ts"]')?.classList.contains('filtered-out')).toBe(false);
+    });
+
     it('skips rendering a detail pane when not provided', async () => {
         await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
         sendFromExtension({ type: 'compareFilesLoaded', files: [] });

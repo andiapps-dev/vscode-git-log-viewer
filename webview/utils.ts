@@ -46,6 +46,12 @@ export function formatDate(isoDate: string): string {
         if (isNaN(d.getTime())) return isoDate;
         return d.toLocaleString();
     } catch {
+        // `new Date(str)` doesn't throw for any string input - an unparseable
+        // string produces an Invalid Date object, already handled by the
+        // isNaN check above - but toLocaleString() is host/ICU-dependent, so
+        // keep this as a genuine last-resort guard rather than assuming it's
+        // provably unreachable.
+        /* v8 ignore next */
         return isoDate;
     }
 }
