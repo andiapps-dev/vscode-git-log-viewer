@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createFixtureRepo, FixtureRepo } from './helpers/createFixtureRepo';
 import { GitService } from '../gitService';
-import { MessageHandler, MessageSender, DiffOpener, PanelCreator } from '../messageHandler';
+import { MessageHandler, MessageSender, DiffOpener, PanelCreator, GitActions } from '../messageHandler';
 import { InitialState } from '../types';
 
 let repo: FixtureRepo;
@@ -18,22 +18,32 @@ afterAll(() => {
 
 function createHandler(
     initialState: Partial<InitialState> = {},
-    overrides?: { sender?: MessageSender; diffOpener?: DiffOpener; panelCreator?: PanelCreator },
+    overrides?: { sender?: MessageSender; diffOpener?: DiffOpener; panelCreator?: PanelCreator; gitActions?: GitActions },
 ) {
     const sender: MessageSender = overrides?.sender || { postMessage: vi.fn() };
-    const diffOpener: DiffOpener = overrides?.diffOpener || { openDiff: vi.fn(), openDiffWithWorkingTree: vi.fn() };
+    const diffOpener: DiffOpener = overrides?.diffOpener || {
+        openDiff: vi.fn(),
+        openDiffWithWorkingTree: vi.fn(),
+        openFileContents: vi.fn(),
+    };
     const panelCreator: PanelCreator = overrides?.panelCreator || {
         createBlamePanel: vi.fn(),
         createComparePanel: vi.fn(),
         createFileLogPanel: vi.fn(),
+    };
+    const gitActions: GitActions = overrides?.gitActions || {
+        cherryPick: vi.fn().mockResolvedValue(true),
+        revertCommit: vi.fn().mockResolvedValue(true),
+        createBranch: vi.fn().mockResolvedValue(true),
+        createTag: vi.fn().mockResolvedValue(true),
     };
     const state: InitialState = {
         mode: 'log',
         targetPath: repo.repoRoot,
         ...initialState,
     };
-    const handler = new MessageHandler(gitService, sender, diffOpener, panelCreator, repo.repoRoot, state);
-    return { handler, sender, diffOpener, panelCreator };
+    const handler = new MessageHandler(gitService, sender, diffOpener, panelCreator, gitActions, repo.repoRoot, state);
+    return { handler, sender, diffOpener, panelCreator, gitActions };
 }
 
 describe('requestCommits', () => {
@@ -71,6 +81,82 @@ describe('requestCommits', () => {
             const d = new Date(c.authorDate);
             expect(d.getFullYear()).toBeGreaterThanOrEqual(2024);
         }
+    });
+
+    it('excludes commits reachable only from other branches by default', async () => {
+        const { handler, sender } = createHandler();
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 1000 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const shas = msg.commits.map((c: { hash: string }) => c.hash);
+        expect(shas).not.toContain(repo.commits['unmerged-preview']);
+    });
+
+    it('includes commits from other branches when branches is "all"', async () => {
+        const { handler, sender } = createHandler();
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 1000, branches: 'all' });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const shas = msg.commits.map((c: { hash: string }) => c.hash);
+        expect(shas).toContain(repo.commits['unmerged-preview']);
+    });
+
+    it('includes commits from only the explicitly named branches', async () => {
+        const { handler, sender } = createHandler();
+        await handler.handle({
+            type: 'requestCommits', offset: 0, count: 1000, branches: ['experimental/preview'],
+        });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const shas = msg.commits.map((c: { hash: string }) => c.hash);
+        expect(shas).toContain(repo.commits['unmerged-preview']);
+    });
+});
+
+describe('requestBranches', () => {
+    it('posts branchesLoaded with the repo branches', async () => {
+        const { handler, sender } = createHandler();
+        await handler.handle({ type: 'requestBranches' });
+
+        const post = (sender.postMessage as ReturnType<typeof vi.fn>);
+        expect(post).toHaveBeenCalledTimes(1);
+        const msg = post.mock.calls[0][0];
+        expect(msg.type).toBe('branchesLoaded');
+        for (const b of repo.branches) {
+            expect(msg.branches).toContain(b);
+        }
+    });
+});
+
+describe('requestCommits (line history mode)', () => {
+    it('serves the -L result on the first request and reports hasMore false', async () => {
+        const { handler, sender } = createHandler({
+            targetPath: repo.repoRoot + '/src/experimental/revert-target.ts',
+            isFile: true,
+            lineStart: 1,
+            lineEnd: 1,
+        });
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 100 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.type).toBe('commitsLoaded');
+        expect(msg.hasMore).toBe(false);
+        expect(msg.commits.length).toBeGreaterThan(0);
+        expect(msg.commits[0].hash).toBe(repo.commits['revert-target-main']);
+    });
+
+    it('returns an empty batch for any subsequent offset without re-querying', async () => {
+        const { handler, sender } = createHandler({
+            targetPath: repo.repoRoot + '/src/experimental/revert-target.ts',
+            isFile: true,
+            lineStart: 1,
+            lineEnd: 1,
+        });
+        await handler.handle({ type: 'requestCommits', offset: 1, count: 100 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.commits).toEqual([]);
+        expect(msg.hasMore).toBe(false);
     });
 });
 
@@ -145,6 +231,17 @@ describe('compareWithWorkingTree', () => {
         const openDiffWithWorkingTree = (diffOpener.openDiffWithWorkingTree as ReturnType<typeof vi.fn>);
         expect(openDiffWithWorkingTree).toHaveBeenCalledTimes(1);
         expect(openDiffWithWorkingTree).toHaveBeenCalledWith(sha, file, 'M');
+    });
+});
+
+describe('viewFileContents', () => {
+    it('calls openFileContents with the given sha and filePath', async () => {
+        const { handler, diffOpener } = createHandler();
+        await handler.handle({ type: 'viewFileContents', sha: 'abc123', filePath: 'src/foo.ts' });
+
+        const openFileContents = (diffOpener.openFileContents as ReturnType<typeof vi.fn>);
+        expect(openFileContents).toHaveBeenCalledTimes(1);
+        expect(openFileContents).toHaveBeenCalledWith('abc123', 'src/foo.ts');
     });
 });
 
@@ -252,6 +349,96 @@ describe('requestBlameData', () => {
         await handler.handle({ type: 'requestBlameData' });
 
         expect((sender.postMessage as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+});
+
+describe('cherryPick', () => {
+    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn().mockResolvedValue(true),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn(),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
+
+        expect(gitActions.cherryPick).toHaveBeenCalledWith('abc123');
+        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
+    });
+
+    it('does not post gitActionCompleted when cancelled or failed', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn().mockResolvedValue(false),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn(),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
+
+        expect(sender.postMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('revertCommit', () => {
+    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn().mockResolvedValue(true),
+            createBranch: vi.fn(),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'revertCommit', sha: 'def456' });
+
+        expect(gitActions.revertCommit).toHaveBeenCalledWith('def456');
+        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
+    });
+});
+
+describe('createBranch', () => {
+    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn().mockResolvedValue(true),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'createBranch', sha: 'aaa111' });
+
+        expect(gitActions.createBranch).toHaveBeenCalledWith('aaa111');
+        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
+    });
+
+    it('does not post gitActionCompleted when the input box is cancelled', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn().mockResolvedValue(false),
+            createTag: vi.fn(),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'createBranch', sha: 'aaa111' });
+
+        expect(sender.postMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('createTag', () => {
+    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
+        const gitActions: GitActions = {
+            cherryPick: vi.fn(),
+            revertCommit: vi.fn(),
+            createBranch: vi.fn(),
+            createTag: vi.fn().mockResolvedValue(true),
+        };
+        const { handler, sender } = createHandler({}, { gitActions });
+        await handler.handle({ type: 'createTag', sha: 'bbb222' });
+
+        expect(gitActions.createTag).toHaveBeenCalledWith('bbb222');
+        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
     });
 });
 

@@ -71,6 +71,44 @@ describe('compare mode', () => {
         expect(document.getElementById('ctx-blame')?.style.display).toBe('');
     });
 
+    it('sends viewFileContents resolved via state.sha2', async () => {
+        const { api } = await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        sendFromExtension({ type: 'compareFilesLoaded', detail1: detail(), detail2: detail(), files: [file({ path: 'a.ts' })] });
+
+        const row = document.querySelector('#files-tbody tr.data-row')!;
+        rightClick(row);
+        click(document.getElementById('ctx-view-file-contents')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'viewFileContents', sha: 'bbb222', filePath: 'a.ts' });
+    });
+
+    it('hides View File Contents for a deleted file even in compare mode', async () => {
+        await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        sendFromExtension({ type: 'compareFilesLoaded', detail1: detail(), detail2: detail(), files: [file({ path: 'gone.ts', status: 'D' })] });
+
+        const row = document.querySelector('#files-tbody tr.data-row')!;
+        rightClick(row);
+        expect(document.getElementById('ctx-view-file-contents')?.style.display).toBe('none');
+    });
+
+    it('groups the file list by directory in folder view', async () => {
+        await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        sendFromExtension({
+            type: 'compareFilesLoaded',
+            detail1: detail(),
+            detail2: detail(),
+            files: [file({ path: 'src/a.ts' }), file({ path: 'src/nested/b.ts' })],
+        });
+
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        const headers = Array.from(document.querySelectorAll('#files-tbody .group-header')).map(el => el.textContent);
+        expect(headers).toEqual(['src', 'src/nested']);
+        const paths = Array.from(document.querySelectorAll('#files-tbody .col-path')).map(el => el.textContent);
+        expect(paths).toEqual(['a.ts', 'b.ts']);
+    });
+
     it('resolves the file-list sha via state.sha2 when no commit list exists', async () => {
         const { api } = await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
         sendFromExtension({ type: 'compareFilesLoaded', detail1: detail(), detail2: detail(), files: [file({ path: 'a.ts' })] });

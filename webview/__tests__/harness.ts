@@ -39,8 +39,11 @@ export const LOG_BODY = `
     <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
     <div class="context-menu-item" id="ctx-compare">Compare with Previous</div>
     <div class="context-menu-item" id="ctx-compare-working">Compare with Working Tree</div>
+    <div class="context-menu-item" id="ctx-view-file-contents">View File Contents</div>
     <div class="context-menu-item" id="ctx-blame">Blame</div>
     <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
     <div class="context-menu-item" id="ctx-refresh">Refresh</div>
@@ -48,9 +51,17 @@ export const LOG_BODY = `
 <div id="commit-context-menu" class="context-menu" style="display:none;">
     <div class="context-menu-item" id="ctx-compare-revisions">Compare Selected Revisions</div>
     <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="ctx-cherry-pick">Cherry-pick</div>
+    <div class="context-menu-item" id="ctx-revert-commit">Revert Commit</div>
+    <div class="context-menu-item" id="ctx-create-branch">Create Branch...</div>
+    <div class="context-menu-item" id="ctx-create-tag">Create Tag...</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="ctx-branches">Branches</div>
+    <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-commit-clear-filters" style="display:none;">Clear Filters</div>
     <div class="context-menu-item" id="ctx-commit-refresh">Refresh</div>
 </div>
+<div id="branches-submenu" class="context-menu" style="display:none;"></div>
 `;
 
 export const COMPARE_BODY = `
@@ -82,8 +93,11 @@ export const COMPARE_BODY = `
     <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
     <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
     <div class="context-menu-item" id="ctx-compare-working" style="display:none;">Compare with Working Tree</div>
+    <div class="context-menu-item" id="ctx-view-file-contents">View File Contents</div>
     <div class="context-menu-item" id="ctx-blame">Blame</div>
     <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
     <div class="context-menu-item" id="ctx-refresh">Refresh</div>
@@ -132,6 +146,9 @@ export interface InitialStateInput {
     sha2?: string;
     blameSha?: string;
     blameFilePath?: string;
+    lineStart?: number;
+    lineEnd?: number;
+    pageSize?: number;
 }
 
 /**

@@ -25,6 +25,11 @@
         "command": "gitLogViewer.showLog",
         "title": "Show Git Log",
         "icon": "$(git-commit)"
+      },
+      {
+        "command": "gitLogViewer.showLineHistory",
+        "title": "Show Line History",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -40,6 +45,25 @@
           "command": "gitLogViewer.showLog",
           "group": "zzz_gitLogViewer",
           "when": "config.git.enabled && gitOpenRepositoryCount != 0 && resourceScheme == file"
+        },
+        {
+          "command": "gitLogViewer.showLineHistory",
+          "group": "zzz_gitLogViewer",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0 && resourceScheme == file"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "gitLogViewer.showLog",
+          "group": "navigation",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0 && resourceScheme == file"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "gitLogViewer.showLog",
+          "group": "navigation",
+          "when": "scmProvider == git"
         }
       ],
       "scm/resourceState/context": [
@@ -60,6 +84,10 @@
         {
           "command": "gitLogViewer.showLog",
           "when": "false"
+        },
+        {
+          "command": "gitLogViewer.showLineHistory",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0"
         }
       ]
     },
@@ -70,7 +98,19 @@
         "mac": "cmd+alt+]",
         "when": "editorTextFocus && config.git.enabled && gitOpenRepositoryCount != 0"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Git Log Viewer",
+      "properties": {
+        "gitLogViewer.pageSize": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Number of commits to load per batch when scrolling the commit list."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",

@@ -9,6 +9,10 @@ import { InitialState } from './types';
 
 const openPanels = new Map<string, GitLogPanel>();
 
+function getPageSize(): number {
+    return vscode.workspace.getConfiguration('gitLogViewer').get<number>('pageSize', 100);
+}
+
 export class GitLogPanel {
     private panel: vscode.WebviewPanel;
     private disposables: vscode.Disposable[] = [];
@@ -59,7 +63,7 @@ export class GitLogPanel {
         const label = path.basename(targetPath);
         let isFile = false;
         try { isFile = fs.statSync(targetPath).isFile(); } catch { /* */ }
-        const initState: InitialState = { mode: 'log', targetPath, isFile };
+        const initState: InitialState = { mode: 'log', targetPath, isFile, pageSize: getPageSize() };
         const panel = new GitLogPanel(extensionUri, gitService, `Git Log: ${label}`, initState, key);
         openPanels.set(key, panel);
         panel.ready = panel.initRepoRoot(targetPath);
@@ -101,8 +105,33 @@ export class GitLogPanel {
             return;
         }
         const label = path.basename(filePath);
-        const initState: InitialState = { mode: 'log', targetPath: fullPath, isFile: true };
+        const initState: InitialState = { mode: 'log', targetPath: fullPath, isFile: true, pageSize: getPageSize() };
         const panel = new GitLogPanel(extensionUri, gitService, `Git Log: ${label}`, initState, key);
+        panel.repoRoot = repoRoot;
+        openPanels.set(key, panel);
+    }
+
+    static createLineHistoryPanel(
+        extensionUri: vscode.Uri,
+        repoRoot: string,
+        filePath: string,
+        lineStart: number,
+        lineEnd: number,
+        gitService: GitService,
+    ): void {
+        const fullPath = path.join(repoRoot, filePath);
+        const key = `lineHistory:${fullPath}:${lineStart}:${lineEnd}`;
+        const existing = openPanels.get(key);
+        if (existing) {
+            existing.panel.reveal();
+            return;
+        }
+        const label = path.basename(filePath);
+        const rangeLabel = lineStart === lineEnd ? `${lineStart}` : `${lineStart}-${lineEnd}`;
+        const initState: InitialState = {
+            mode: 'log', targetPath: fullPath, isFile: true, lineStart, lineEnd, pageSize: getPageSize(),
+        };
+        const panel = new GitLogPanel(extensionUri, gitService, `Line History: ${label}:${rangeLabel}`, initState, key);
         panel.repoRoot = repoRoot;
         openPanels.set(key, panel);
     }
@@ -155,6 +184,8 @@ export class GitLogPanel {
                         this.openDiff(leftSha, rightSha, filePath, oldPath, status),
                     openDiffWithWorkingTree: (sha, filePath, status) =>
                         this.openDiffWithWorkingTree(sha, filePath, status),
+                    openFileContents: (sha, filePath) =>
+                        this.openFileContents(sha, filePath),
                 },
                 {
                     createBlamePanel: (sha, filePath) =>
@@ -163,6 +194,12 @@ export class GitLogPanel {
                         GitLogPanel.createComparePanel(this.extensionUri, this.repoRoot, sha1, sha2, this.gitService),
                     createFileLogPanel: filePath =>
                         GitLogPanel.createFileLogPanel(this.extensionUri, this.repoRoot, filePath, this.gitService),
+                },
+                {
+                    cherryPick: sha => this.cherryPick(sha),
+                    revertCommit: sha => this.revertCommit(sha),
+                    createBranch: sha => this.createBranch(sha),
+                    createTag: sha => this.createTag(sha),
                 },
                 this.repoRoot,
                 this.initialState,
@@ -207,6 +244,78 @@ export class GitLogPanel {
         const title = `${path.basename(filePath)} (${shortSha} ↔ Working Tree)`;
 
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+    }
+
+    private async openFileContents(sha: string, filePath: string): Promise<void> {
+        const uri = DiffDocProvider.encodeUri(this.repoRoot, sha, filePath);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    private async cherryPick(sha: string): Promise<boolean> {
+        try {
+            await this.gitService.cherryPick(this.repoRoot, sha);
+            vscode.window.showInformationMessage(`Cherry-picked ${sha.substring(0, 8)} onto the current branch.`);
+            return true;
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            vscode.window.showErrorMessage(
+                `Cherry-pick failed: ${msg}. Resolve conflicts in Source Control, then run `
+                + `'git cherry-pick --continue' or '--abort' from the terminal.`,
+            );
+            return false;
+        }
+    }
+
+    private async revertCommit(sha: string): Promise<boolean> {
+        try {
+            await this.gitService.revertCommit(this.repoRoot, sha);
+            vscode.window.showInformationMessage(`Reverted ${sha.substring(0, 8)}.`);
+            return true;
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            vscode.window.showErrorMessage(
+                `Revert failed: ${msg}. Resolve conflicts in Source Control, then run `
+                + `'git revert --continue' or '--abort' from the terminal.`,
+            );
+            return false;
+        }
+    }
+
+    private async createBranch(sha: string): Promise<boolean> {
+        const name = await vscode.window.showInputBox({
+            prompt: `Branch name for commit ${sha.substring(0, 8)}`,
+            placeHolder: 'e.g. feature/my-branch',
+            validateInput: v => v.trim() ? undefined : 'Branch name cannot be empty',
+        });
+        if (!name) return false;
+        try {
+            await this.gitService.createBranch(this.repoRoot, name.trim(), sha);
+            vscode.window.showInformationMessage(`Created branch '${name.trim()}' at ${sha.substring(0, 8)}.`);
+            return true;
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            vscode.window.showErrorMessage(`Failed to create branch: ${msg}`);
+            return false;
+        }
+    }
+
+    private async createTag(sha: string): Promise<boolean> {
+        const name = await vscode.window.showInputBox({
+            prompt: `Tag name for commit ${sha.substring(0, 8)}`,
+            placeHolder: 'e.g. v1.2.0',
+            validateInput: v => v.trim() ? undefined : 'Tag name cannot be empty',
+        });
+        if (!name) return false;
+        try {
+            await this.gitService.createTag(this.repoRoot, name.trim(), sha);
+            vscode.window.showInformationMessage(`Created tag '${name.trim()}' at ${sha.substring(0, 8)}.`);
+            return true;
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            vscode.window.showErrorMessage(`Failed to create tag: ${msg}`);
+            return false;
+        }
     }
 
     private postError(message: string): void {
@@ -290,8 +399,11 @@ export class GitLogPanel {
         <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare">Compare with Previous</div>
         <div class="context-menu-item" id="ctx-compare-working">Compare with Working Tree</div>
+        <div class="context-menu-item" id="ctx-view-file-contents">View File Contents</div>
         <div class="context-menu-item" id="ctx-blame">Blame</div>
         <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
         <div class="context-menu-item" id="ctx-refresh">Refresh</div>
@@ -299,9 +411,17 @@ export class GitLogPanel {
     <div id="commit-context-menu" class="context-menu" style="display:none;">
         <div class="context-menu-item" id="ctx-compare-revisions">Compare Selected Revisions</div>
         <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-cherry-pick">Cherry-pick</div>
+        <div class="context-menu-item" id="ctx-revert-commit">Revert Commit</div>
+        <div class="context-menu-item" id="ctx-create-branch">Create Branch...</div>
+        <div class="context-menu-item" id="ctx-create-tag">Create Tag...</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-branches">Branches</div>
+        <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="ctx-commit-clear-filters" style="display:none;">Clear Filters</div>
         <div class="context-menu-item" id="ctx-commit-refresh">Refresh</div>
     </div>
+    <div id="branches-submenu" class="context-menu" style="display:none;"></div>
     <script nonce="${nonce}">var initialState = ${safeJsonStringify(this.initialState)};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -355,8 +475,11 @@ export class GitLogPanel {
         <div class="context-menu-item" id="ctx-show-file-log">Show File Log</div>
         <div class="context-menu-item" id="ctx-compare" style="display:none;">Compare with Previous</div>
         <div class="context-menu-item" id="ctx-compare-working" style="display:none;">Compare with Working Tree</div>
+        <div class="context-menu-item" id="ctx-view-file-contents">View File Contents</div>
         <div class="context-menu-item" id="ctx-blame">Blame</div>
         <div class="context-menu-item" id="ctx-copy-path">Copy Path</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
         <div class="context-menu-separator"></div>
         <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
         <div class="context-menu-item" id="ctx-refresh">Refresh</div>
