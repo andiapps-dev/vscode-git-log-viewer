@@ -35,6 +35,9 @@ export interface InitialState {
     sha2?: string;
     blameSha?: string;
     blameFilePath?: string;
+    lineStart?: number;
+    lineEnd?: number;
+    pageSize?: number;
 }
 
 export interface BlameLineData {
@@ -55,6 +58,11 @@ export interface RequestCommitsMessage {
     count: number;
     after?: string;
     before?: string;
+    branches?: 'all' | string[];
+}
+
+export interface RequestBranchesMessage {
+    type: 'requestBranches';
 }
 
 export interface RequestCommitDetailsMessage {
@@ -77,6 +85,12 @@ export interface CompareWithWorkingTreeMessage {
     filePath: string;
     oldPath?: string;
     status: string;
+}
+
+export interface ViewFileContentsMessage {
+    type: 'viewFileContents';
+    sha: string;
+    filePath: string;
 }
 
 export interface BlameMessage {
@@ -111,10 +125,39 @@ export interface RequestBlameDataMessage {
     type: 'requestBlameData';
 }
 
+export interface CherryPickMessage {
+    type: 'cherryPick';
+    sha: string;
+}
+
+export interface RevertCommitMessage {
+    type: 'revertCommit';
+    sha: string;
+}
+
+export interface CreateBranchMessage {
+    type: 'createBranch';
+    sha: string;
+}
+
+export interface CreateTagMessage {
+    type: 'createTag';
+    sha: string;
+}
+
+export interface GitActionCompletedMessage {
+    type: 'gitActionCompleted';
+}
+
 export interface CommitsLoadedMessage {
     type: 'commitsLoaded';
     commits: Commit[];
     hasMore: boolean;
+}
+
+export interface BranchesLoadedMessage {
+    type: 'branchesLoaded';
+    branches: string[];
 }
 
 export interface CommitDetailsLoadedMessage {

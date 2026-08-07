@@ -41,6 +41,9 @@ interface InitialState {
     sha2?: string;
     blameSha?: string;
     blameFilePath?: string;
+    lineStart?: number;
+    lineEnd?: number;
+    pageSize?: number;
 }
 
 const vscode = acquireVsCodeApi();
@@ -59,6 +62,8 @@ let loading = false;
 // this guard, an intermediate row's response arriving after the final one
 // silently overwrites the detail panel/file list with the wrong commit.
 let latestRequestedDetailSha: string | null = null;
+
+let folderViewEnabled = false;
 
 let commitSortColumn: keyof Commit | null = null;
 let commitSortAsc = false;
@@ -214,9 +219,27 @@ function showCommitContextMenu(e: MouseEvent): void {
 
     const compareRevItem = document.getElementById('ctx-compare-revisions');
     const commitClearFilters = document.getElementById('ctx-commit-clear-filters');
+    const cherryPickItem = document.getElementById('ctx-cherry-pick');
+    const revertItem = document.getElementById('ctx-revert-commit');
+    const createBranchItem = document.getElementById('ctx-create-branch');
+    const createTagItem = document.getElementById('ctx-create-tag');
+    const branchesItem = document.getElementById('ctx-branches');
+
     if (compareRevItem) {
         compareRevItem.style.display = selectedCommitShas.length === 2 ? '' : 'none';
     }
+    const singleSelected = selectedCommitShas.length === 1;
+    if (cherryPickItem) cherryPickItem.style.display = singleSelected ? '' : 'none';
+    if (revertItem) revertItem.style.display = singleSelected ? '' : 'none';
+    if (createBranchItem) createBranchItem.style.display = singleSelected ? '' : 'none';
+    if (createTagItem) createTagItem.style.display = singleSelected ? '' : 'none';
+    if (branchesItem) {
+        // -L walks a single line range's history in one shot; combining that
+        // with --all or explicit branch args isn't supported, so hide it.
+        branchesItem.style.display = state.lineStart ? 'none' : '';
+        branchesItem.textContent = branchesMenuLabel();
+    }
+    hideBranchesSubmenu();
     if (commitClearFilters) {
         commitClearFilters.style.display = '';
     }
@@ -231,6 +254,7 @@ function hideCommitContextMenu(): void {
     if (commitContextMenu) {
         commitContextMenu.style.display = 'none';
     }
+    hideBranchesSubmenu();
 }
 
 if (document.getElementById('ctx-compare-revisions')) {
@@ -246,6 +270,138 @@ if (document.getElementById('ctx-compare-revisions')) {
                 sha1: olderSha,
                 sha2: newerSha,
             });
+        }
+        hideCommitContextMenu();
+    });
+}
+
+// --- Branches submenu (log mode) ---
+
+let allBranchesSelected = false;
+let selectedBranches: string[] = [];
+let branchList: string[] | null = null;
+
+function branchesMenuLabel(): string {
+    if (allBranchesSelected) return 'Branches: All';
+    if (selectedBranches.length > 0) return `Branches: ${selectedBranches.length} selected`;
+    return 'Branches';
+}
+
+function hideBranchesSubmenu(): void {
+    const submenu = document.getElementById('branches-submenu');
+    if (submenu) submenu.style.display = 'none';
+}
+
+function renderBranchesSubmenu(): void {
+    const submenu = document.getElementById('branches-submenu');
+    if (!submenu || !branchList) return;
+    submenu.innerHTML = '';
+
+    const allItem = document.createElement('div');
+    allItem.className = 'context-menu-item';
+    allItem.textContent = allBranchesSelected ? '✓ All' : 'All';
+    allItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        allBranchesSelected = true;
+        selectedBranches = [];
+        updateBranchesMenu();
+        reloadCommits();
+        hideCommitContextMenu();
+    });
+    submenu.appendChild(allItem);
+
+    const sep = document.createElement('div');
+    sep.className = 'context-menu-separator';
+    submenu.appendChild(sep);
+
+    for (const branch of branchList) {
+        const item = document.createElement('div');
+        item.className = 'context-menu-item';
+        const checked = !allBranchesSelected && selectedBranches.includes(branch);
+        item.textContent = checked ? `✓ ${branch}` : branch;
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            allBranchesSelected = false;
+            const idx = selectedBranches.indexOf(branch);
+            if (idx >= 0) selectedBranches.splice(idx, 1);
+            else selectedBranches.push(branch);
+            updateBranchesMenu();
+            reloadCommits();
+        });
+        submenu.appendChild(item);
+    }
+}
+
+// Re-renders both the "Branches" label on the parent menu and the submenu's
+// checkmarks after a selection change, without closing either menu.
+function updateBranchesMenu(): void {
+    const branchesItem = document.getElementById('ctx-branches');
+    if (branchesItem) branchesItem.textContent = branchesMenuLabel();
+    renderBranchesSubmenu();
+}
+
+function toggleBranchesSubmenu(anchorEl: HTMLElement): void {
+    const submenu = document.getElementById('branches-submenu');
+    if (!submenu) return;
+    if (submenu.style.display === 'block') {
+        hideBranchesSubmenu();
+        return;
+    }
+    if (branchList === null) {
+        vscode.postMessage({ type: 'requestBranches' });
+    } else {
+        renderBranchesSubmenu();
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    submenu.style.display = 'block';
+    submenu.style.left = `${rect.right}px`;
+    submenu.style.top = `${rect.top}px`;
+    clampMenu(submenu);
+}
+
+const ctxBranches = document.getElementById('ctx-branches');
+if (ctxBranches) {
+    ctxBranches.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleBranchesSubmenu(ctxBranches);
+    });
+}
+
+const ctxCherryPick = document.getElementById('ctx-cherry-pick');
+if (ctxCherryPick) {
+    ctxCherryPick.addEventListener('click', () => {
+        if (selectedCommitShas.length === 1) {
+            vscode.postMessage({ type: 'cherryPick', sha: selectedCommitShas[0] });
+        }
+        hideCommitContextMenu();
+    });
+}
+
+const ctxRevertCommit = document.getElementById('ctx-revert-commit');
+if (ctxRevertCommit) {
+    ctxRevertCommit.addEventListener('click', () => {
+        if (selectedCommitShas.length === 1) {
+            vscode.postMessage({ type: 'revertCommit', sha: selectedCommitShas[0] });
+        }
+        hideCommitContextMenu();
+    });
+}
+
+const ctxCreateBranch = document.getElementById('ctx-create-branch');
+if (ctxCreateBranch) {
+    ctxCreateBranch.addEventListener('click', () => {
+        if (selectedCommitShas.length === 1) {
+            vscode.postMessage({ type: 'createBranch', sha: selectedCommitShas[0] });
+        }
+        hideCommitContextMenu();
+    });
+}
+
+const ctxCreateTag = document.getElementById('ctx-create-tag');
+if (ctxCreateTag) {
+    ctxCreateTag.addEventListener('click', () => {
+        if (selectedCommitShas.length === 1) {
+            vscode.postMessage({ type: 'createTag', sha: selectedCommitShas[0] });
         }
         hideCommitContextMenu();
     });
@@ -325,13 +481,30 @@ function renderCompareDetail(panelId: string, detail: CommitDetail): void {
 
 // --- Files list rendering (shared between both modes) ---
 
+function dirOf(filePath: string): string {
+    const idx = filePath.lastIndexOf('/');
+    return idx === -1 ? '(root)' : filePath.substring(0, idx);
+}
+
+function baseNameOf(filePath: string): string {
+    const idx = filePath.lastIndexOf('/');
+    return idx === -1 ? filePath : filePath.substring(idx + 1);
+}
+
+function groupKeyFor(file: FileChange, hasParentGroups: boolean): string {
+    if (hasParentGroups && folderViewEnabled) return `${file.parentGroup || ''} — ${dirOf(file.path)}`;
+    if (hasParentGroups) return file.parentGroup || '';
+    return dirOf(file.path);
+}
+
 function renderFiles(): void {
-    const hasGroups = allFiles.some(f => f.parentGroup);
+    const hasParentGroups = allFiles.some(f => f.parentGroup);
+    const useGroups = hasParentGroups || folderViewEnabled;
     let sorted: FileChange[];
-    if (hasGroups) {
+    if (useGroups) {
         const groups = new Map<string, FileChange[]>();
         for (const f of allFiles) {
-            const key = f.parentGroup || '';
+            const key = groupKeyFor(f, hasParentGroups);
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key)!.push(f);
         }
@@ -343,16 +516,17 @@ function renderFiles(): void {
         sorted = sortArray(allFiles, fileSortColumn, fileSortAsc);
     }
     filesTbody.innerHTML = '';
-    let currentGroup = '';
+    let currentGroup: string | null = null;
     for (const file of sorted) {
-        if (file.parentGroup && file.parentGroup !== currentGroup) {
-            currentGroup = file.parentGroup;
+        const key = useGroups ? groupKeyFor(file, hasParentGroups) : null;
+        if (useGroups && key !== currentGroup) {
+            currentGroup = key;
             const groupRow = document.createElement('tr');
             groupRow.className = 'group-header-row';
             const groupCell = document.createElement('td');
             groupCell.colSpan = 4;
             groupCell.className = 'group-header';
-            groupCell.textContent = currentGroup;
+            groupCell.textContent = currentGroup || '';
             groupRow.appendChild(groupCell);
             filesTbody.appendChild(groupRow);
         }
@@ -366,11 +540,14 @@ function renderFiles(): void {
 
         const tdPath = document.createElement('td');
         tdPath.className = 'col-path';
-        const displayPath = file.status === 'R' && file.oldPath
+        const fullDisplayPath = file.status === 'R' && file.oldPath
             ? `${file.oldPath} → ${file.path}`
             : file.path;
-        tdPath.textContent = displayPath;
-        tdPath.title = displayPath;
+        const shortDisplayPath = file.status === 'R' && file.oldPath
+            ? `${baseNameOf(file.oldPath)} → ${baseNameOf(file.path)}`
+            : baseNameOf(file.path);
+        tdPath.textContent = folderViewEnabled ? shortDisplayPath : fullDisplayPath;
+        tdPath.title = fullDisplayPath;
         tr.appendChild(tdPath);
 
         const tdStatus = document.createElement('td');
@@ -438,6 +615,8 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     const blameItem = document.getElementById('ctx-blame')!;
     const showLogItem = document.getElementById('ctx-show-file-log')!;
     const clearFiltersItem = document.getElementById('ctx-clear-filters');
+    const viewContentsItem = document.getElementById('ctx-view-file-contents');
+    const canViewContents = !!file && file.status !== 'D';
 
     if (file) {
         showLogItem.style.display = '';
@@ -445,24 +624,34 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
             compareItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
             compareWorkingItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
             blameItem.style.display = selectedCommitShas.length >= 1 ? '' : 'none';
+            if (viewContentsItem) viewContentsItem.style.display = (selectedCommitShas.length >= 1 && canViewContents) ? '' : 'none';
         } else if (state.mode === 'compare') {
             compareItem.style.display = '';
             compareWorkingItem.style.display = '';
             blameItem.style.display = '';
+            if (viewContentsItem) viewContentsItem.style.display = canViewContents ? '' : 'none';
         } else {
             compareItem.style.display = 'none';
             compareWorkingItem.style.display = 'none';
             blameItem.style.display = 'none';
+            if (viewContentsItem) viewContentsItem.style.display = 'none';
         }
     } else {
         showLogItem.style.display = 'none';
         compareItem.style.display = 'none';
         compareWorkingItem.style.display = 'none';
         blameItem.style.display = 'none';
+        if (viewContentsItem) viewContentsItem.style.display = 'none';
     }
 
     const copyPathItem = document.getElementById('ctx-copy-path');
     if (copyPathItem) copyPathItem.style.display = file ? '' : 'none';
+
+    const folderViewItem = document.getElementById('ctx-folder-view');
+    if (folderViewItem) {
+        folderViewItem.style.display = '';
+        folderViewItem.textContent = folderViewEnabled ? '✓ Folder View' : 'Folder View';
+    }
 
     if (clearFiltersItem) {
         clearFiltersItem.style.display = '';
@@ -561,6 +750,33 @@ document.getElementById('ctx-blame')!.addEventListener('click', () => {
     }
     hideFileContextMenu();
 });
+
+// View File Contents
+const ctxViewFileContents = document.getElementById('ctx-view-file-contents');
+if (ctxViewFileContents) {
+    ctxViewFileContents.addEventListener('click', () => {
+        if (!contextFile) { hideFileContextMenu(); return; }
+        const sha = resolveFileListSha();
+        if (sha) {
+            vscode.postMessage({
+                type: 'viewFileContents',
+                sha,
+                filePath: contextFile.path,
+            });
+        }
+        hideFileContextMenu();
+    });
+}
+
+// Folder View toggle
+const ctxFolderView = document.getElementById('ctx-folder-view');
+if (ctxFolderView) {
+    ctxFolderView.addEventListener('click', () => {
+        folderViewEnabled = !folderViewEnabled;
+        hideFileContextMenu();
+        renderFiles();
+    });
+}
 
 // Copy path
 const ctxCopyPath = document.getElementById('ctx-copy-path');
@@ -714,14 +930,21 @@ function autoLoadIfNeeded(): void {
     }
 }
 
+const PAGE_SIZE = state.pageSize || 100;
+
 function requestMoreCommits(): void {
     loading = true;
     if (loadMore) loadMore.textContent = 'Loading...';
     const msg: Record<string, unknown> = {
         type: 'requestCommits',
         offset: allCommits.length,
-        count: 100,
+        count: PAGE_SIZE,
     };
+    if (allBranchesSelected) {
+        msg.branches = 'all';
+    } else if (selectedBranches.length > 0) {
+        msg.branches = selectedBranches;
+    }
     if (dateFilterFrom['authorDate']) {
         msg.after = dateFilterFrom['authorDate'] + 'T00:00:00';
     }
@@ -1207,6 +1430,15 @@ window.addEventListener('message', (event) => {
         }
         case 'blameDataLoaded': {
             renderBlame(msg.lines, msg.commits);
+            break;
+        }
+        case 'gitActionCompleted': {
+            if (state.mode === 'log') reloadCommits();
+            break;
+        }
+        case 'branchesLoaded': {
+            branchList = msg.branches;
+            renderBranchesSubmenu();
             break;
         }
         case 'error': {

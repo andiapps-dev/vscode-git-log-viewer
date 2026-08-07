@@ -153,14 +153,42 @@ export class GitService {
         return hashes.length >= 2 ? hashes[1] : null;
     }
 
-    async getLog(repoRoot: string, targetPath: string, skip: number, count: number, after?: string, before?: string, followRenames = false): Promise<Commit[]> {
+    async getLog(repoRoot: string, targetPath: string, skip: number, count: number, after?: string, before?: string, followRenames = false, branches?: 'all' | string[]): Promise<Commit[]> {
         const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D`;
         const args = ['log', '--decorate=short', `--format=${format}`, `--skip=${skip}`, `-${count}`];
+        if (branches === 'all') {
+            args.push('--all');
+        } else if (Array.isArray(branches) && branches.length > 0) {
+            args.push(...branches);
+        }
         // --follow only tracks renames for a single file; git errors/ignores it for directories.
         if (followRenames && targetPath !== '.') args.push('--follow');
         if (after) args.push(`--since=${after}`);
         if (before) args.push(`--until=${before}`);
         args.push('--', targetPath);
+        const out = await exec(args, repoRoot);
+        return parseLogOutput(out);
+    }
+
+    async listBranches(repoRoot: string): Promise<string[]> {
+        const out = await exec(
+            ['for-each-ref', '--format=%(refname:short)|%(symref)', 'refs/heads', 'refs/remotes'],
+            repoRoot,
+        );
+        return out.trim().split('\n')
+            .filter(Boolean)
+            // Symbolic refs (e.g. origin/HEAD -> origin/main) collapse to a bare
+            // remote name via refname:short and aren't a resolvable revision on
+            // their own - %(symref) is only non-empty for these, so drop them.
+            .filter(line => !line.split('|')[1])
+            .map(line => line.split('|')[0]);
+    }
+
+    async getLineHistory(repoRoot: string, filePath: string, lineStart: number, lineEnd: number, after?: string, before?: string): Promise<Commit[]> {
+        const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D`;
+        const args = ['log', '--decorate=short', `--format=${format}`, '--no-patch', `-L${lineStart},${lineEnd}:${filePath}`];
+        if (after) args.push(`--since=${after}`);
+        if (before) args.push(`--until=${before}`);
         const out = await exec(args, repoRoot);
         return parseLogOutput(out);
     }
@@ -228,5 +256,21 @@ export class GitService {
     async blameStructured(repoRoot: string, sha: string, filePath: string): Promise<BlameLineData[]> {
         const output = await this.blameRaw(repoRoot, sha, filePath);
         return parseBlameOutput(output);
+    }
+
+    async createBranch(repoRoot: string, name: string, sha: string): Promise<void> {
+        await exec(['branch', name, sha], repoRoot);
+    }
+
+    async createTag(repoRoot: string, name: string, sha: string): Promise<void> {
+        await exec(['tag', name, sha], repoRoot);
+    }
+
+    async cherryPick(repoRoot: string, sha: string): Promise<void> {
+        await exec(['cherry-pick', sha], repoRoot);
+    }
+
+    async revertCommit(repoRoot: string, sha: string): Promise<void> {
+        await exec(['revert', '--no-edit', sha], repoRoot);
     }
 }

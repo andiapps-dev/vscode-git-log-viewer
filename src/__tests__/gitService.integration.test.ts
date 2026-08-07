@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { createFixtureRepo, FixtureRepo } from './helpers/createFixtureRepo';
 import { GitService } from '../gitService';
 import * as path from 'path';
+import * as fs from 'fs';
 
 let repo: FixtureRepo;
 let git: GitService;
@@ -491,5 +492,141 @@ describe('revert commit', () => {
         expect(files.length).toBeGreaterThan(0);
         const deleted = files.find(f => f.status === 'D');
         expect(deleted).toBeDefined();
+    });
+});
+
+describe('getLog branch scope', () => {
+    it('excludes commits reachable only from other branches by default', async () => {
+        const commits = await git.getLog(repo.repoRoot, '.', 0, 2000);
+        const shas = commits.map(c => c.hash);
+        expect(shas).not.toContain(repo.commits['unmerged-preview']);
+    });
+
+    it('includes commits from other branches when branches is "all"', async () => {
+        const commits = await git.getLog(repo.repoRoot, '.', 0, 2000, undefined, undefined, false, 'all');
+        const shas = commits.map(c => c.hash);
+        expect(shas).toContain(repo.commits['unmerged-preview']);
+    });
+
+    it('decorates the unmerged branch tip with its branch name when branches is "all"', async () => {
+        const commits = await git.getLog(repo.repoRoot, '.', 0, 2000, undefined, undefined, false, 'all');
+        const commit = commits.find(c => c.hash === repo.commits['unmerged-preview']);
+        expect(commit?.refs).toContain('experimental/preview');
+    });
+
+    it('includes commits from only the explicitly named branches', async () => {
+        const commits = await git.getLog(
+            repo.repoRoot, '.', 0, 2000, undefined, undefined, false, ['experimental/preview'],
+        );
+        const shas = commits.map(c => c.hash);
+        expect(shas).toContain(repo.commits['unmerged-preview']);
+    });
+
+    it('excludes other branches when a different explicit branch list is given', async () => {
+        const commits = await git.getLog(repo.repoRoot, '.', 0, 2000, undefined, undefined, false, ['main']);
+        const shas = commits.map(c => c.hash);
+        expect(shas).not.toContain(repo.commits['unmerged-preview']);
+    });
+});
+
+describe('listBranches', () => {
+    it('returns local branches created in the fixture repo', async () => {
+        const branches = await git.listBranches(repo.repoRoot);
+        for (const b of repo.branches) {
+            expect(branches).toContain(b);
+        }
+    });
+
+    it('includes real remote-tracking branches', async () => {
+        const branches = await git.listBranches(repo.repoRoot);
+        expect(branches).toContain('origin/main');
+    });
+
+    it('excludes the bare remote name produced by an origin/HEAD symref', async () => {
+        // git branch --format collapses refs/remotes/origin/HEAD's short name
+        // down to the bare "origin" (not "origin/HEAD"), which isn't a
+        // resolvable revision on its own - the fixture repo sets this symref
+        // up specifically so this case is exercised, not just assumed absent.
+        const branches = await git.listBranches(repo.repoRoot);
+        expect(branches).not.toContain('origin');
+    });
+});
+
+describe('getLineHistory', () => {
+    it('returns only the commit that touched a line never touched again', async () => {
+        const commits = await git.getLineHistory(repo.repoRoot, 'src/experimental/revert-target.ts', 1, 1);
+        expect(commits).toHaveLength(1);
+        expect(commits[0].hash).toBe(repo.commits['revert-target-main']);
+    });
+
+    it('returns multiple commits for a line touched repeatedly', async () => {
+        const commits = await git.getLineHistory(repo.repoRoot, 'src/components/footer.ts', 1, 1);
+        expect(commits.length).toBeGreaterThan(1);
+    });
+
+    it('applies date filters', async () => {
+        const commits = await git.getLineHistory(
+            repo.repoRoot, 'src/components/footer.ts', 1, 1, '2024-01-01T00:00:00',
+        );
+        expect(commits.length).toBeGreaterThan(0);
+        for (const c of commits) {
+            expect(new Date(c.authorDate).getFullYear()).toBeGreaterThanOrEqual(2024);
+        }
+    });
+
+    it('rejects when the line range is out of bounds', async () => {
+        await expect(
+            git.getLineHistory(repo.repoRoot, 'src/experimental/revert-target.ts', 9999, 10005),
+        ).rejects.toThrow();
+    });
+});
+
+describe('createBranch', () => {
+    it('creates a branch pointing at the given commit', async () => {
+        const sha = repo.commits['foundation-0'];
+        await git.createBranch(repo.repoRoot, 'test/created-branch', sha);
+        expect(rawGit(['rev-parse', 'test/created-branch'])).toBe(sha);
+    });
+
+    it('rejects when the branch name already exists', async () => {
+        await expect(git.createBranch(repo.repoRoot, 'main', repo.commits['foundation-0'])).rejects.toThrow();
+    });
+});
+
+describe('createTag', () => {
+    it('creates a tag pointing at the given commit', async () => {
+        const sha = repo.commits['foundation-0'];
+        await git.createTag(repo.repoRoot, 'test-created-tag', sha);
+        expect(rawGit(['rev-parse', 'test-created-tag'])).toBe(sha);
+    });
+
+    it('rejects when the tag name already exists', async () => {
+        await expect(git.createTag(repo.repoRoot, 'v1.0', repo.commits['foundation-0'])).rejects.toThrow();
+    });
+});
+
+describe('cherryPick', () => {
+    it('applies an unmerged commit onto the current branch as a new commit', async () => {
+        const sha = repo.commits['unmerged-preview'];
+        const headBefore = rawGit(['rev-parse', 'HEAD']);
+
+        await git.cherryPick(repo.repoRoot, sha);
+
+        const headAfter = rawGit(['rev-parse', 'HEAD']);
+        expect(headAfter).not.toBe(headBefore);
+        expect(headAfter).not.toBe(sha);
+        expect(rawGit(['log', '-1', '--format=%s'])).toBe('feat: add experimental preview feature (unmerged)');
+        expect(fs.existsSync(path.join(repo.repoRoot, 'src/experimental/preview-feature.ts'))).toBe(true);
+    });
+});
+
+describe('revertCommit', () => {
+    it('reverts the given commit, removing the change it introduced', async () => {
+        const sha = repo.commits['revert-target-main'];
+
+        await git.revertCommit(repo.repoRoot, sha);
+
+        expect(fs.existsSync(path.join(repo.repoRoot, 'src/experimental/revert-target.ts'))).toBe(false);
+        expect(rawGit(['log', '-1', '--format=%s'])).toContain('Revert');
     });
 });

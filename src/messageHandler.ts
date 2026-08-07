@@ -17,6 +17,7 @@ export interface MessageSender {
 export interface DiffOpener {
     openDiff(leftSha: string, rightSha: string, filePath: string, oldPath?: string, status?: string): Promise<void>;
     openDiffWithWorkingTree(sha: string, filePath: string, status?: string): Promise<void>;
+    openFileContents(sha: string, filePath: string): Promise<void>;
 }
 
 export interface PanelCreator {
@@ -25,12 +26,25 @@ export interface PanelCreator {
     createFileLogPanel(filePath: string): void;
 }
 
+// Implemented in the extension host, where vscode.window prompts/notifications
+// live. Each method returns false when the action didn't happen (user
+// cancelled an input box, or the underlying git command failed - failures are
+// reported to the user via a native notification there, not surfaced here) so
+// the handler knows whether to tell the webview to refresh.
+export interface GitActions {
+    cherryPick(sha: string): Promise<boolean>;
+    revertCommit(sha: string): Promise<boolean>;
+    createBranch(sha: string): Promise<boolean>;
+    createTag(sha: string): Promise<boolean>;
+}
+
 export class MessageHandler {
     constructor(
         private gitService: GitService,
         private sender: MessageSender,
         private diffOpener: DiffOpener,
         private panelCreator: PanelCreator,
+        private gitActions: GitActions,
         private repoRoot: string,
         private initialState: InitialState,
     ) {}
@@ -69,6 +83,24 @@ export class MessageHandler {
                 case 'requestBlameData':
                     await this.onRequestBlameData();
                     break;
+                case 'requestBranches':
+                    await this.onRequestBranches();
+                    break;
+                case 'viewFileContents':
+                    await this.onViewFileContents(msg as { sha: string; filePath: string });
+                    break;
+                case 'cherryPick':
+                    await this.onCherryPick(msg as { sha: string });
+                    break;
+                case 'revertCommit':
+                    await this.onRevertCommit(msg as { sha: string });
+                    break;
+                case 'createBranch':
+                    await this.onCreateBranch(msg as { sha: string });
+                    break;
+                case 'createTag':
+                    await this.onCreateTag(msg as { sha: string });
+                    break;
             }
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -79,6 +111,22 @@ export class MessageHandler {
     private async onRequestCommits(msg: RequestCommitsMessage): Promise<void> {
         const targetPath = this.initialState.targetPath || '';
         const relativePath = path.relative(this.repoRoot, targetPath);
+        const { lineStart, lineEnd } = this.initialState;
+
+        if (lineStart && lineEnd) {
+            // -L walks the whole history of the range in one shot; there's no
+            // --skip/-N pagination for it, so only serve the first request.
+            if (msg.offset > 0) {
+                this.sender.postMessage({ type: 'commitsLoaded', commits: [], hasMore: false });
+                return;
+            }
+            const commits = await this.gitService.getLineHistory(
+                this.repoRoot, relativePath, lineStart, lineEnd, msg.after, msg.before,
+            );
+            this.sender.postMessage({ type: 'commitsLoaded', commits, hasMore: false });
+            return;
+        }
+
         const commits = await this.gitService.getLog(
             this.repoRoot,
             relativePath || '.',
@@ -87,6 +135,7 @@ export class MessageHandler {
             msg.after,
             msg.before,
             this.initialState.isFile,
+            msg.branches,
         );
         this.sender.postMessage({
             type: 'commitsLoaded',
@@ -185,5 +234,34 @@ export class MessageHandler {
             lines: blameLines,
             commits,
         });
+    }
+
+    private async onRequestBranches(): Promise<void> {
+        const branches = await this.gitService.listBranches(this.repoRoot);
+        this.sender.postMessage({ type: 'branchesLoaded', branches });
+    }
+
+    private async onViewFileContents(msg: { sha: string; filePath: string }): Promise<void> {
+        await this.diffOpener.openFileContents(msg.sha, msg.filePath);
+    }
+
+    private async onCherryPick(msg: { sha: string }): Promise<void> {
+        const completed = await this.gitActions.cherryPick(msg.sha);
+        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
+    }
+
+    private async onRevertCommit(msg: { sha: string }): Promise<void> {
+        const completed = await this.gitActions.revertCommit(msg.sha);
+        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
+    }
+
+    private async onCreateBranch(msg: { sha: string }): Promise<void> {
+        const completed = await this.gitActions.createBranch(msg.sha);
+        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
+    }
+
+    private async onCreateTag(msg: { sha: string }): Promise<void> {
+        const completed = await this.gitActions.createTag(msg.sha);
+        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
     }
 }

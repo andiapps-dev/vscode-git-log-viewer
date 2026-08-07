@@ -422,7 +422,38 @@ export function createFixtureRepo(): FixtureRepo {
         commits[`late-${i}`] = sha;
     }
 
-    const allFiles = [...TEXT_FILES, ...BINARY_FILES];
+    // --- Phase 21: Unmerged branch (commit reachable only from a non-current
+    // branch, for testing "all branches" log scope and cherry-pick) ---
+    git(['checkout', '-b', 'experimental/preview'], repoRoot);
+    branches.push('experimental/preview');
+    const previewDate = makeDate(20, 0);
+    const previewAuthor = AUTHORS[8]; // Iris
+    const previewFile = 'src/experimental/preview-feature.ts';
+    fs.mkdirSync(path.join(repoRoot, 'src/experimental'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, previewFile), generateContent(previewFile, 1));
+    const previewSha = commitWithAuthor(repoRoot, previewAuthor, 'feat: add experimental preview feature (unmerged)', previewDate);
+    commits['unmerged-preview'] = previewSha;
+    git(['checkout', 'main'], repoRoot);
+
+    // --- Phase 22: Standalone commit on main touching a never-again-touched
+    // file, safe to cherry-pick/revert in tests without conflicts ---
+    const revertTargetDate = makeDate(20, 5);
+    const revertTargetAuthor = AUTHORS[0]; // Alice
+    const revertTargetFile2 = 'src/experimental/revert-target.ts';
+    // Checking out main removed src/experimental/ again: it only exists in
+    // the experimental/preview branch's tree, not main's.
+    fs.mkdirSync(path.join(repoRoot, 'src/experimental'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, revertTargetFile2), generateContent(revertTargetFile2, 1));
+    const revertTargetSha2 = commitWithAuthor(repoRoot, revertTargetAuthor, 'feat: add revert-target feature (for revert tests)', revertTargetDate);
+    commits['revert-target-main'] = revertTargetSha2;
+
+    // --- Phase 23: Fake remote-tracking refs (no real remote is configured,
+    // but this simulates one closely enough to exercise listBranches's
+    // origin/HEAD symref filtering, which needs a real symbolic ref to test) ---
+    git(['update-ref', 'refs/remotes/origin/main', revertTargetSha2], repoRoot);
+    git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], repoRoot);
+
+    const allFiles = [...TEXT_FILES, ...BINARY_FILES, previewFile, revertTargetFile2];
 
     return {
         repoRoot,

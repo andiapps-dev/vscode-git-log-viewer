@@ -421,6 +421,25 @@ describe('log mode: file context menu actions', () => {
         expect(api.postMessage).toHaveBeenCalledWith({ type: 'showFileLog', filePath: 'a.ts' });
     });
 
+    it('sends viewFileContents with the selected commit sha and file path', async () => {
+        const { api } = await setupWithSelectedFile();
+        click(document.getElementById('ctx-view-file-contents')!);
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'viewFileContents', sha: 'h1', filePath: 'a.ts' });
+    });
+
+    it('hides View File Contents for a deleted file', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        sendFromExtension({
+            type: 'commitDetailsLoaded',
+            detail: { hash: 'h1', shortHash: 'h1', authorName: 'A', authorEmail: 'a', authorDate: '2024-01-01', body: '' },
+            files: [file({ path: 'gone.ts', status: 'D' })],
+        });
+        api.postMessage.mockClear();
+        rightClick(document.querySelector('#files-tbody tr.data-row')!);
+        expect(document.getElementById('ctx-view-file-contents')?.style.display).toBe('none');
+    });
+
     it('copies the path to the clipboard', async () => {
         await setupWithSelectedFile();
         click(document.getElementById('ctx-copy-path')!);
@@ -433,6 +452,84 @@ describe('log mode: file context menu actions', () => {
         rightClick(document.getElementById('files-changed-panel')!);
         expect(document.getElementById('ctx-compare')?.style.display).toBe('none');
         expect(document.getElementById('ctx-show-file-log')?.style.display).toBe('none');
+        expect(document.getElementById('ctx-view-file-contents')?.style.display).toBe('none');
+    });
+});
+
+describe('log mode: folder view toggle', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    async function loadWithFiles(files: ReturnType<typeof file>[]) {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        sendFromExtension({
+            type: 'commitDetailsLoaded',
+            detail: { hash: 'h1', shortHash: 'h1', authorName: 'A', authorEmail: 'a', authorDate: '2024-01-01', body: '' },
+            files,
+        });
+    }
+
+    it('shows a flat list of full paths by default', async () => {
+        await loadWithFiles([file({ path: 'src/a.ts' }), file({ path: 'src/nested/b.ts' })]);
+        const paths = Array.from(document.querySelectorAll('#files-tbody .col-path')).map(el => el.textContent);
+        expect(paths).toEqual(['src/a.ts', 'src/nested/b.ts']);
+        expect(document.querySelectorAll('#files-tbody .group-header-row')).toHaveLength(0);
+    });
+
+    it('groups files by directory with basenames shown, once Folder View is toggled on', async () => {
+        await loadWithFiles([file({ path: 'src/a.ts' }), file({ path: 'src/nested/b.ts' }), file({ path: 'src/a2.ts' })]);
+
+        rightClick(document.getElementById('files-changed-panel')!);
+        expect(document.getElementById('ctx-folder-view')?.textContent).toBe('Folder View');
+        click(document.getElementById('ctx-folder-view')!);
+
+        const headers = Array.from(document.querySelectorAll('#files-tbody .group-header')).map(el => el.textContent);
+        expect(headers).toEqual(['src', 'src/nested']);
+        const paths = Array.from(document.querySelectorAll('#files-tbody .col-path')).map(el => el.textContent);
+        expect(paths).toEqual(['a.ts', 'a2.ts', 'b.ts']);
+    });
+
+    it('keeps the full path available as a tooltip in folder view', async () => {
+        await loadWithFiles([file({ path: 'src/nested/deep/b.ts' })]);
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        const cell = document.querySelector('#files-tbody .col-path') as HTMLElement;
+        expect(cell.textContent).toBe('b.ts');
+        expect(cell.title).toBe('src/nested/deep/b.ts');
+    });
+
+    it('shows a checkmark and reverts to a flat list when toggled off again', async () => {
+        await loadWithFiles([file({ path: 'src/a.ts' })]);
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        rightClick(document.getElementById('files-changed-panel')!);
+        expect(document.getElementById('ctx-folder-view')?.textContent).toBe('✓ Folder View');
+        click(document.getElementById('ctx-folder-view')!);
+
+        const paths = Array.from(document.querySelectorAll('#files-tbody .col-path')).map(el => el.textContent);
+        expect(paths).toEqual(['src/a.ts']);
+        expect(document.querySelectorAll('#files-tbody .group-header-row')).toHaveLength(0);
+    });
+
+    it('groups root-level files under a (root) header', async () => {
+        await loadWithFiles([file({ path: 'README.md' })]);
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        expect(document.querySelector('#files-tbody .group-header')?.textContent).toBe('(root)');
+        expect(document.querySelector('#files-tbody .col-path')?.textContent).toBe('README.md');
+    });
+
+    it('shows a shortened rename arrow using basenames in folder view', async () => {
+        await loadWithFiles([file({ path: 'src/new/name.ts', oldPath: 'src/old/name.ts', status: 'R' })]);
+        rightClick(document.getElementById('files-changed-panel')!);
+        click(document.getElementById('ctx-folder-view')!);
+
+        expect(document.querySelector('#files-tbody .col-path')?.textContent).toBe('name.ts → name.ts');
     });
 });
 
@@ -699,6 +796,243 @@ describe('log mode: additional selection + refresh + navigation behavior', () =>
             type: 'requestCommits',
             offset: 0,
             before: '2024-06-30T23:59:59',
+        }));
+    });
+});
+
+describe('log mode: git action commit context menu items', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('shows cherry-pick/revert/branch/tag only when exactly one commit is selected', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
+            hasMore: false,
+        });
+
+        // h1 auto-selected on load.
+        rightClick(document.getElementById('commit-list-panel')!);
+        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
+            expect(document.getElementById(id)?.style.display).toBe('');
+        }
+
+        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
+        click(row2, { ctrlKey: true }); // now 2 selected
+        rightClick(document.getElementById('commit-list-panel')!);
+        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
+            expect(document.getElementById(id)?.style.display).toBe('none');
+        }
+    });
+
+    it('sends cherryPick with the selected sha', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-cherry-pick')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'cherryPick', sha: 'h1' });
+    });
+
+    it('sends revertCommit with the selected sha', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-revert-commit')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'revertCommit', sha: 'h1' });
+    });
+
+    it('sends createBranch with the selected sha', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-create-branch')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'createBranch', sha: 'h1' });
+    });
+
+    it('sends createTag with the selected sha', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-create-tag')!);
+
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'createTag', sha: 'h1' });
+    });
+});
+
+describe('log mode: branches submenu', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    async function openBranchesSubmenu(api: { postMessage: ReturnType<typeof vi.fn> }, branches: string[]) {
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-branches')!);
+        sendFromExtension({ type: 'branchesLoaded', branches });
+    }
+
+    it('shows a default label and sends no branch filter by default', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-branches')?.textContent).toBe('Branches');
+
+        const initialRequest = api.postMessage.mock.calls[0][0];
+        expect(initialRequest.branches).toBeUndefined();
+    });
+
+    it('requests the branch list only the first time the submenu is opened', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-branches')!);
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'requestBranches' });
+        sendFromExtension({ type: 'branchesLoaded', branches: ['main', 'feature/x'] });
+
+        api.postMessage.mockClear();
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-branches')!);
+        expect(api.postMessage).not.toHaveBeenCalledWith({ type: 'requestBranches' });
+    });
+
+    it('renders "All" plus a checkable row per branch once loaded', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main', 'feature/x']);
+
+        const items = Array.from(document.querySelectorAll('#branches-submenu .context-menu-item')).map(el => el.textContent);
+        expect(items).toEqual(['All', 'main', 'feature/x']);
+    });
+
+    it('selecting "All" reloads with branches: "all", updates the label, and closes the menu', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main', 'feature/x']);
+
+        api.postMessage.mockClear();
+        const allItem = Array.from(document.querySelectorAll('#branches-submenu .context-menu-item'))
+            .find(el => el.textContent === 'All')!;
+        click(allItem);
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0, branches: 'all',
+        }));
+        expect(document.getElementById('commit-context-menu')?.style.display).toBe('none');
+        expect(document.getElementById('branches-submenu')?.style.display).toBe('none');
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-branches')?.textContent).toBe('Branches: All');
+    });
+
+    it('selecting specific branches multi-selects, reloads, and keeps the menu open', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main', 'feature/x']);
+
+        api.postMessage.mockClear();
+        const mainItem = Array.from(document.querySelectorAll('#branches-submenu .context-menu-item'))
+            .find(el => el.textContent === 'main')!;
+        click(mainItem);
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0, branches: ['main'],
+        }));
+        // Multi-select: the submenu stays open so a second branch can be picked.
+        expect(document.getElementById('branches-submenu')?.style.display).toBe('block');
+        const mainAfterClick = Array.from(document.querySelectorAll('#branches-submenu .context-menu-item'))
+            .find(el => el.textContent?.includes('main'))!;
+        expect(mainAfterClick.textContent).toBe('✓ main');
+
+        const featureItem = Array.from(document.querySelectorAll('#branches-submenu .context-menu-item'))
+            .find(el => el.textContent === 'feature/x')!;
+        click(featureItem);
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0, branches: ['main', 'feature/x'],
+        }));
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-branches')?.textContent).toBe('Branches: 2 selected');
+    });
+
+    it('selecting a specific branch clears an "All" selection, and vice versa', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        await openBranchesSubmenu(api, ['main']);
+
+        const allItem = () => Array.from(document.querySelectorAll('#branches-submenu .context-menu-item')).find(el => el.textContent?.includes('All'))!;
+        const mainItem = () => Array.from(document.querySelectorAll('#branches-submenu .context-menu-item')).find(el => el.textContent?.includes('main'))!;
+
+        click(allItem());
+        rightClick(document.getElementById('commit-list-panel')!);
+        click(document.getElementById('ctx-branches')!);
+        expect(allItem().textContent).toBe('✓ All');
+
+        click(mainItem());
+        expect(allItem().textContent).toBe('All');
+        expect(mainItem().textContent).toBe('✓ main');
+    });
+
+    it('is hidden in line-history mode', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo/file.ts', isFile: true, lineStart: 5, lineEnd: 10 });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-branches')?.style.display).toBe('none');
+    });
+});
+
+describe('log mode: gitActionCompleted', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('reloads the commit list', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+        api.postMessage.mockClear();
+        sendFromExtension({ type: 'gitActionCompleted' });
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0,
+        }));
+    });
+});
+
+describe('log mode: configurable page size', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('uses the pageSize from initialState for requestCommits count', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false, pageSize: 25 });
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0, count: 25,
+        }));
+    });
+
+    it('defaults to 100 when pageSize is not provided', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'requestCommits', offset: 0, count: 100,
         }));
     });
 });
