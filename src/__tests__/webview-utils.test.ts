@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sortArray, statusClass, statusLabel, escapeHtml, formatDate, formatTimeAgo } from '../../webview/utils';
 
 describe('sortArray', () => {
@@ -111,7 +111,22 @@ describe('formatDate', () => {
 });
 
 describe('formatTimeAgo', () => {
+    // formatTimeAgo computes elapsed time from its own internal Date.now()
+    // call, made at whatever moment the test actually runs - not from a
+    // `now` captured earlier here. Any real wall-clock drift between the
+    // two (test runner scheduling, a slow CI runner, ...) can flip a
+    // boundary case like now-59 from "just now" to "1m ago". Freeze time so
+    // both reads are guaranteed identical instead of merely close.
     const now = Math.floor(Date.now() / 1000);
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(now * 1000);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
 
     it('returns just now for recent timestamps', () => {
         expect(formatTimeAgo(now - 30)).toBe('just now');
