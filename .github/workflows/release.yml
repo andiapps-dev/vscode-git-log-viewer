@@ -55,7 +55,7 @@ jobs:
       # No Marketplace publish here by design — download the .vsix from
       # this release and upload it at marketplace.visualstudio.com/manage
       # yourself. See vscode-git-log-viewer-scripts/README.md.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes.md
           generate_release_notes: true
