@@ -696,6 +696,29 @@ describe('log mode: commit context menu', () => {
         rightClick(document.getElementById('commit-list-panel')!);
         expect(document.getElementById('ctx-compare-revisions')?.style.display).toBe('none');
     });
+
+    it('hides the separator leading into Compare Selected Revisions alongside it', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
+            hasMore: false,
+        });
+
+        // Exactly one selected (h1, auto-selected on load): both hide, or
+        // the menu would open on a stray separator line with nothing above
+        // it.
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-compare-revisions')?.style.display).toBe('none');
+        expect(document.getElementById('ctx-compare-separator')?.style.display).toBe('none');
+
+        // Exactly two selected: both show.
+        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
+        click(row2, { ctrlKey: true });
+        rightClick(document.getElementById('commit-list-panel')!);
+        expect(document.getElementById('ctx-compare-revisions')?.style.display).toBe('');
+        expect(document.getElementById('ctx-compare-separator')?.style.display).toBe('');
+    });
 });
 
 describe('log mode: menu dismissal', () => {
@@ -914,6 +937,36 @@ describe('log mode: additional selection + refresh + navigation behavior', () =>
         expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'requestCommits', offset: 5 }));
     });
 
+    it('keeps an active filter applied to newly-appended rows from a load-more page', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h1', subject: 'keep-me' })],
+            hasMore: true,
+        });
+
+        const filterInput = document.querySelector<HTMLInputElement>('#commit-table input[data-col="subject"]')!;
+        filterInput.value = 'keep-me';
+        filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // A second page of commits arrives (e.g. from infinite scroll) while
+        // the subject filter is still active. renderCommits() rebuilds the
+        // whole tbody from scratch, which would otherwise show the new
+        // non-matching row until the next keystroke re-applied the filter -
+        // it must re-apply the still-active filter itself.
+        api.postMessage.mockClear();
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h2', subject: 'other' })],
+            hasMore: false,
+        });
+
+        const h1Row = document.querySelector('#commit-tbody tr[data-sha="h1"]')!;
+        const h2Row = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
+        expect(h1Row.classList.contains('filtered-out')).toBe(false);
+        expect(h2Row.classList.contains('filtered-out')).toBe(true);
+    });
+
     it('reloads with a server-side "to" date range when the to-date filter changes', async () => {
         const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
         sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
@@ -928,98 +981,6 @@ describe('log mode: additional selection + refresh + navigation behavior', () =>
             offset: 0,
             before: '2024-06-30T23:59:59',
         }));
-    });
-});
-
-describe('log mode: git action commit context menu items', () => {
-    beforeEach(() => {
-        document.body.innerHTML = '';
-    });
-
-    it('shows cherry-pick/revert/branch/tag only when exactly one commit is selected', async () => {
-        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({
-            type: 'commitsLoaded',
-            commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
-            hasMore: false,
-        });
-
-        // h1 auto-selected on load.
-        rightClick(document.getElementById('commit-list-panel')!);
-        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
-            expect(document.getElementById(id)?.style.display).toBe('');
-        }
-
-        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
-        click(row2, { ctrlKey: true }); // now 2 selected
-        rightClick(document.getElementById('commit-list-panel')!);
-        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
-            expect(document.getElementById(id)?.style.display).toBe('none');
-        }
-    });
-
-    it('sends nothing for cherry-pick/revert/branch/tag when invoked without exactly one selected', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({
-            type: 'commitsLoaded',
-            commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
-            hasMore: false,
-        });
-        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
-        click(row2, { ctrlKey: true }); // now 2 selected
-
-        api.postMessage.mockClear();
-        for (const id of ['ctx-cherry-pick', 'ctx-revert-commit', 'ctx-create-branch', 'ctx-create-tag']) {
-            click(document.getElementById(id)!);
-        }
-
-        for (const type of ['cherryPick', 'revertCommit', 'createBranch', 'createTag']) {
-            expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type }));
-        }
-    });
-
-    it('sends cherryPick with the selected sha', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
-
-        api.postMessage.mockClear();
-        rightClick(document.getElementById('commit-list-panel')!);
-        click(document.getElementById('ctx-cherry-pick')!);
-
-        expect(api.postMessage).toHaveBeenCalledWith({ type: 'cherryPick', sha: 'h1' });
-    });
-
-    it('sends revertCommit with the selected sha', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
-
-        api.postMessage.mockClear();
-        rightClick(document.getElementById('commit-list-panel')!);
-        click(document.getElementById('ctx-revert-commit')!);
-
-        expect(api.postMessage).toHaveBeenCalledWith({ type: 'revertCommit', sha: 'h1' });
-    });
-
-    it('sends createBranch with the selected sha', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
-
-        api.postMessage.mockClear();
-        rightClick(document.getElementById('commit-list-panel')!);
-        click(document.getElementById('ctx-create-branch')!);
-
-        expect(api.postMessage).toHaveBeenCalledWith({ type: 'createBranch', sha: 'h1' });
-    });
-
-    it('sends createTag with the selected sha', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
-
-        api.postMessage.mockClear();
-        rightClick(document.getElementById('commit-list-panel')!);
-        click(document.getElementById('ctx-create-tag')!);
-
-        expect(api.postMessage).toHaveBeenCalledWith({ type: 'createTag', sha: 'h1' });
     });
 });
 
@@ -1173,24 +1134,6 @@ describe('log mode: branches submenu', () => {
         expect(mainItem().textContent).toBe('main');
         const lastCall = api.postMessage.mock.calls[api.postMessage.mock.calls.length - 1][0];
         expect(lastCall.branches).toBeUndefined();
-    });
-});
-
-describe('log mode: gitActionCompleted', () => {
-    beforeEach(() => {
-        document.body.innerHTML = '';
-    });
-
-    it('reloads the commit list', async () => {
-        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
-        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
-
-        api.postMessage.mockClear();
-        sendFromExtension({ type: 'gitActionCompleted' });
-
-        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'requestCommits', offset: 0,
-        }));
     });
 });
 

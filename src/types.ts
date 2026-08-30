@@ -125,30 +125,6 @@ export interface RequestBlameDataMessage {
     type: 'requestBlameData';
 }
 
-export interface CherryPickMessage {
-    type: 'cherryPick';
-    sha: string;
-}
-
-export interface RevertCommitMessage {
-    type: 'revertCommit';
-    sha: string;
-}
-
-export interface CreateBranchMessage {
-    type: 'createBranch';
-    sha: string;
-}
-
-export interface CreateTagMessage {
-    type: 'createTag';
-    sha: string;
-}
-
-export interface GitActionCompletedMessage {
-    type: 'gitActionCompleted';
-}
-
 export interface CommitsLoadedMessage {
     type: 'commitsLoaded';
     commits: Commit[];

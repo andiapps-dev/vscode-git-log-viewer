@@ -50,12 +50,7 @@ export const LOG_BODY = `
 </div>
 <div id="commit-context-menu" class="context-menu" style="display:none;">
     <div class="context-menu-item" id="ctx-compare-revisions">Compare Selected Revisions</div>
-    <div class="context-menu-separator"></div>
-    <div class="context-menu-item" id="ctx-cherry-pick">Cherry-pick</div>
-    <div class="context-menu-item" id="ctx-revert-commit">Revert Commit</div>
-    <div class="context-menu-item" id="ctx-create-branch">Create Branch...</div>
-    <div class="context-menu-item" id="ctx-create-tag">Create Tag...</div>
-    <div class="context-menu-separator"></div>
+    <div class="context-menu-separator" id="ctx-compare-separator"></div>
     <div class="context-menu-item" id="ctx-branches">Branches</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-commit-clear-filters" style="display:none;">Clear Filters</div>

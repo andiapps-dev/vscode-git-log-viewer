@@ -435,7 +435,7 @@ export function createFixtureRepo(): FixtureRepo {
     }
 
     // --- Phase 21: Unmerged branch (commit reachable only from a non-current
-    // branch, for testing "all branches" log scope and cherry-pick) ---
+    // branch, for testing "all branches" log scope) ---
     git(['checkout', '-b', 'experimental/preview'], repoRoot);
     branches.push('experimental/preview');
     const previewDate = makeDate(20, 0);
@@ -448,7 +448,7 @@ export function createFixtureRepo(): FixtureRepo {
     git(['checkout', 'main'], repoRoot);
 
     // --- Phase 22: Standalone commit on main touching a never-again-touched
-    // file, safe to cherry-pick/revert in tests without conflicts ---
+    // file, used by the line-history tests below ---
     const revertTargetDate = makeDate(20, 5);
     const revertTargetAuthor = AUTHORS[0]; // Alice
     const revertTargetFile2 = 'src/experimental/revert-target.ts';
@@ -456,7 +456,7 @@ export function createFixtureRepo(): FixtureRepo {
     // the experimental/preview branch's tree, not main's.
     fs.mkdirSync(path.join(repoRoot, 'src/experimental'), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, revertTargetFile2), generateContent(revertTargetFile2, 1));
-    const revertTargetSha2 = commitWithAuthor(repoRoot, revertTargetAuthor, 'feat: add revert-target feature (for revert tests)', revertTargetDate);
+    const revertTargetSha2 = commitWithAuthor(repoRoot, revertTargetAuthor, 'feat: add revert-target feature', revertTargetDate);
     commits['revert-target-main'] = revertTargetSha2;
 
     // --- Phase 23: Fake remote-tracking refs (no real remote is configured,
