@@ -26,25 +26,12 @@ export interface PanelCreator {
     createFileLogPanel(filePath: string): void;
 }
 
-// Implemented in the extension host, where vscode.window prompts/notifications
-// live. Each method returns false when the action didn't happen (user
-// cancelled an input box, or the underlying git command failed - failures are
-// reported to the user via a native notification there, not surfaced here) so
-// the handler knows whether to tell the webview to refresh.
-export interface GitActions {
-    cherryPick(sha: string): Promise<boolean>;
-    revertCommit(sha: string): Promise<boolean>;
-    createBranch(sha: string): Promise<boolean>;
-    createTag(sha: string): Promise<boolean>;
-}
-
 export class MessageHandler {
     constructor(
         private gitService: GitService,
         private sender: MessageSender,
         private diffOpener: DiffOpener,
         private panelCreator: PanelCreator,
-        private gitActions: GitActions,
         private repoRoot: string,
         private initialState: InitialState,
     ) {}
@@ -88,18 +75,6 @@ export class MessageHandler {
                     break;
                 case 'viewFileContents':
                     await this.onViewFileContents(msg as { sha: string; filePath: string });
-                    break;
-                case 'cherryPick':
-                    await this.onCherryPick(msg as { sha: string });
-                    break;
-                case 'revertCommit':
-                    await this.onRevertCommit(msg as { sha: string });
-                    break;
-                case 'createBranch':
-                    await this.onCreateBranch(msg as { sha: string });
-                    break;
-                case 'createTag':
-                    await this.onCreateTag(msg as { sha: string });
                     break;
             }
         } catch (e: unknown) {
@@ -243,25 +218,5 @@ export class MessageHandler {
 
     private async onViewFileContents(msg: { sha: string; filePath: string }): Promise<void> {
         await this.diffOpener.openFileContents(msg.sha, msg.filePath);
-    }
-
-    private async onCherryPick(msg: { sha: string }): Promise<void> {
-        const completed = await this.gitActions.cherryPick(msg.sha);
-        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
-    }
-
-    private async onRevertCommit(msg: { sha: string }): Promise<void> {
-        const completed = await this.gitActions.revertCommit(msg.sha);
-        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
-    }
-
-    private async onCreateBranch(msg: { sha: string }): Promise<void> {
-        const completed = await this.gitActions.createBranch(msg.sha);
-        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
-    }
-
-    private async onCreateTag(msg: { sha: string }): Promise<void> {
-        const completed = await this.gitActions.createTag(msg.sha);
-        if (completed) this.sender.postMessage({ type: 'gitActionCompleted' });
     }
 }

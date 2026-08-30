@@ -218,31 +218,31 @@ function showCommitContextMenu(e: MouseEvent): void {
     e.stopPropagation();
 
     const compareRevItem = document.getElementById('ctx-compare-revisions');
+    const compareSeparator = document.getElementById('ctx-compare-separator');
     const commitClearFilters = document.getElementById('ctx-commit-clear-filters');
-    const cherryPickItem = document.getElementById('ctx-cherry-pick');
-    const revertItem = document.getElementById('ctx-revert-commit');
-    const createBranchItem = document.getElementById('ctx-create-branch');
-    const createTagItem = document.getElementById('ctx-create-tag');
     const branchesItem = document.getElementById('ctx-branches');
 
-    // compareRevItem/cherryPickItem/revertItem/createBranchItem/createTagItem
-    // /branchesItem/commitClearFilters are all static siblings within the
-    // same log-mode-only #commit-context-menu template (see gitLogPanel.ts's
-    // getLogHtml) - this function only ever runs when that template is the
-    // one on the page (guarded by the !commitContextMenu check above), so
-    // they're always present together or not at all. The `if (xxxItem)`
-    // guards exist for TypeScript's strict-null-checks on getElementById's
-    // return type, not because any of them can actually be null here in
-    // practice - there's no realistic DOM state that isolates just one.
+    // compareRevItem/branchesItem/commitClearFilters are all static siblings
+    // within the same log-mode-only #commit-context-menu template (see
+    // gitLogPanel.ts's getLogHtml) - this function only ever runs when that
+    // template is the one on the page (guarded by the !commitContextMenu
+    // check above), so they're always present together or not at all. The
+    // `if (xxxItem)` guards exist for TypeScript's strict-null-checks on
+    // getElementById's return type, not because any of them can actually be
+    // null here in practice - there's no realistic DOM state that isolates
+    // just one.
     /* v8 ignore start */
+    const showCompareRev = selectedCommitShas.length === 2;
     if (compareRevItem) {
-        compareRevItem.style.display = selectedCommitShas.length === 2 ? '' : 'none';
+        compareRevItem.style.display = showCompareRev ? '' : 'none';
     }
-    const singleSelected = selectedCommitShas.length === 1;
-    if (cherryPickItem) cherryPickItem.style.display = singleSelected ? '' : 'none';
-    if (revertItem) revertItem.style.display = singleSelected ? '' : 'none';
-    if (createBranchItem) createBranchItem.style.display = singleSelected ? '' : 'none';
-    if (createTagItem) createTagItem.style.display = singleSelected ? '' : 'none';
+    // Without this, hiding Compare Selected Revisions (not exactly two
+    // commits selected - the common case) leaves this separator sitting at
+    // the very top of the menu with nothing above it - a stray-looking
+    // line before Branches instead of a clean start to the menu.
+    if (compareSeparator) {
+        compareSeparator.style.display = showCompareRev ? '' : 'none';
+    }
     if (branchesItem) {
         // -L walks a single line range's history in one shot; combining that
         // with --all or explicit branch args isn't supported, so hide it.
@@ -375,46 +375,6 @@ if (ctxBranches) {
     ctxBranches.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleBranchesSubmenu(ctxBranches);
-    });
-}
-
-const ctxCherryPick = document.getElementById('ctx-cherry-pick');
-if (ctxCherryPick) {
-    ctxCherryPick.addEventListener('click', () => {
-        if (selectedCommitShas.length === 1) {
-            vscode.postMessage({ type: 'cherryPick', sha: selectedCommitShas[0] });
-        }
-        hideCommitContextMenu();
-    });
-}
-
-const ctxRevertCommit = document.getElementById('ctx-revert-commit');
-if (ctxRevertCommit) {
-    ctxRevertCommit.addEventListener('click', () => {
-        if (selectedCommitShas.length === 1) {
-            vscode.postMessage({ type: 'revertCommit', sha: selectedCommitShas[0] });
-        }
-        hideCommitContextMenu();
-    });
-}
-
-const ctxCreateBranch = document.getElementById('ctx-create-branch');
-if (ctxCreateBranch) {
-    ctxCreateBranch.addEventListener('click', () => {
-        if (selectedCommitShas.length === 1) {
-            vscode.postMessage({ type: 'createBranch', sha: selectedCommitShas[0] });
-        }
-        hideCommitContextMenu();
-    });
-}
-
-const ctxCreateTag = document.getElementById('ctx-create-tag');
-if (ctxCreateTag) {
-    ctxCreateTag.addEventListener('click', () => {
-        if (selectedCommitShas.length === 1) {
-            vscode.postMessage({ type: 'createTag', sha: selectedCommitShas[0] });
-        }
-        hideCommitContextMenu();
     });
 }
 
@@ -1458,10 +1418,6 @@ window.addEventListener('message', (event) => {
         }
         case 'blameDataLoaded': {
             renderBlame(msg.lines, msg.commits);
-            break;
-        }
-        case 'gitActionCompleted': {
-            if (state.mode === 'log') reloadCommits();
             break;
         }
         case 'branchesLoaded': {

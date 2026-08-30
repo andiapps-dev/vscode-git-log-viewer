@@ -7,10 +7,47 @@ re-recording after UI changes is a rerun instead of a manual capture.
 ./record-demo.sh [--coverage] [path-to-demo-repo] [target-file-in-repo]
 ```
 
-Defaults to `~/Downloads/vscode-demo` and `package.json`. The target repo
-just needs real git history for the target file - `package.json` in a large,
-actively-developed repo makes for a good demo (a small/sparse repo may
-produce a thin or squashed history that doesn't show off filtering well).
+Defaults to `~/Downloads/demo-express` (a full local clone of
+[expressjs/express](https://github.com/expressjs/express) - small and fast
+to clone, but with genuine multi-author history, real branches, and enough
+depth to show off filtering) and `package.json`.
+
+## Setting up (or recreating) the demo repo
+
+```
+./setup-demo-repo.sh [path-to-create]
+```
+
+Run this once before the first `record-demo.sh`, and again any time
+`~/Downloads/demo-express` needs recreating (deleted, corrupted, moved
+machines, ...) - it wipes and rebuilds the target directory from scratch
+every time, so it's always safe to re-run.
+
+**Why a separate setup step, not just `git clone`:** `record-demo.sh`'s
+`row_y()` helper and a long list of hardcoded SHA comments throughout it
+are calibrated against package.json's history looking *exactly* like it
+does as of one specific commit. express is a real, actively-developed
+project - a plain `git clone` today gives a different HEAD than one run
+next month, silently invalidating every calibrated position. `record-demo.sh`
+itself never fetches (see its step 0), which keeps an *existing* checkout
+frozen, but does nothing to help recreate the directory identically if it's
+ever lost - `setup-demo-repo.sh` is that: it clones express, hard-resets
+master to the exact pinned commit `record-demo.sh` assumes
+(`PINNED_DEMO_SHA`, currently `a3714473`), recreates the one local-only
+fixture branch (below), and then **removes the `origin` remote** - with no
+remote configured, `git fetch`/`git pull` in that directory can't silently
+move master out from under the calibrated positions even by accident, not
+just "please don't run that here." `record-demo.sh` checks for both the
+pinned commit and the fixture branch at startup and fails loudly with a
+pointer back to this script if either is missing.
+
+The fixture branch is `feature/rate-limit-docs` (local-only, never pushed
+anywhere) - a single self-contained commit that gives the Branches-filter
+segments (scoping the log to just this branch, then combining it with
+master via "All") something real to filter down to. It deliberately touches
+`package.json` itself (the same file the demo's log view is scoped to, so
+the commit is actually visible/selectable there) alongside a new docs file
+that nothing else in history also touches.
 
 ## What it does
 
@@ -59,11 +96,16 @@ exits - a killed process may not.
 ## Requires
 
 `docker`, `code` (VS Code CLI), and `sudo` (the Docker build step matches
-`build.sh`/`install.sh`). `xdotool`, `ffmpeg`, `wmctrl`, and `fontconfig`
-are checked at startup and auto-installed via `apt` if missing -
-`check_prereqs` deliberately doesn't try to install docker or VS Code
+`build.sh`/`install.sh`). `xdotool`, `ffmpeg`, `wmctrl`, `fontconfig`,
+`curl`, and `python3` are checked at startup and auto-installed via `apt`
+if missing, and the `websocket-client` pip package is installed if missing
+too - `check_prereqs` deliberately doesn't try to install docker or VS Code
 itself, since those are bigger, more invasive decisions than a demo
 recording script should make on its own.
+
+`python3` + `websocket-client` drive the one part of this script that talks
+to the webview via Chrome DevTools Protocol instead of simulated mouse
+clicks - see "Driving the Branches submenu" below.
 
 ## Window safety (`winsafe.sh`)
 
@@ -75,9 +117,39 @@ not just once at launch. This exists because a stale/closed window can
 otherwise cause `xdotool` to silently deliver input to whatever real window
 happens to be on top, including your own actual VS Code windows.
 
+## Driving the Branches submenu (Chrome DevTools Protocol)
+
+Every menu interaction in this script is a plain `xdotool` click except
+one: picking a branch out of the Branches submenu (nested inside the
+commit-context-menu). That submenu populates via a real async round-trip to
+the extension host (`git branch` runs and replies before there's anything
+to render), so *how long until it's actually clickable* isn't a fixed UI
+render delay the way everything else in this script is - it visibly grows
+under the same CPU load `ffmpeg`'s capture adds during a real recording,
+and no fixed sleep (tried up to 6s) nor a pixel-color verify-and-retry loop
+made clicking into it reliable.
+
+`click_branches_submenu_item()` (`winsafe.sh`) instead drives it via Chrome
+DevTools Protocol: the isolated instance is launched with
+`--remote-debugging-port`/`--remote-allow-origins=*`, which exposes the
+webview as a normal debuggable target, and `Runtime.evaluate` calls
+`.click()` on the exact DOM element directly - the same click handler a
+real click would fire, but requiring no rendering to have already happened,
+and letting the script poll *real application state* (does the submenu
+have children yet?) instead of guessing from a timer or a screenshot. A
+real `xdotool` mouse hover at the item's approximate on-screen position
+still happens first, purely so its `:hover` highlight is visible in the
+recording - the actual click is CDP either way, so an imprecise hover
+position only costs a slightly-off highlight, never a wrong selection.
+
 ## If the UI changes
 
 The click coordinates in `record-demo.sh`'s action sequence are calibrated
 against a fixed 1900x1140 window. If a UI change shifts where something
 renders, take a screenshot mid-run (the script leaves the window up until
 `ffmpeg`/cleanup run) and adjust the affected `demo_mousemove` coordinates.
+When clicking a menu item (not a table row or a right-click that just opens
+one), pause after the `demo_mousemove` and before the `demo_click` - a beat
+long enough for the `:hover` highlight to actually be visible on screen,
+not just the click's result appearing - matching every other menu-item
+click in this script.

@@ -258,19 +258,4 @@ export class GitService {
         return parseBlameOutput(output);
     }
 
-    async createBranch(repoRoot: string, name: string, sha: string): Promise<void> {
-        await exec(['branch', name, sha], repoRoot);
-    }
-
-    async createTag(repoRoot: string, name: string, sha: string): Promise<void> {
-        await exec(['tag', name, sha], repoRoot);
-    }
-
-    async cherryPick(repoRoot: string, sha: string): Promise<void> {
-        await exec(['cherry-pick', sha], repoRoot);
-    }
-
-    async revertCommit(repoRoot: string, sha: string): Promise<void> {
-        await exec(['revert', '--no-edit', sha], repoRoot);
-    }
 }

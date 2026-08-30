@@ -13,6 +13,11 @@ Right-click a file or folder in the VS Code Explorer, or right-click inside an o
 - **Commit details** — full SHA, author, date, and commit message body
 - **Changed files** — files modified in the selected commit with status, lines added/removed
 
+### Branches
+Right-click the commit list and select **Branches** to scope the log to one or more
+specific branches (multi-select) instead of just the checked-out branch, or choose
+**All** to combine every branch's commits into one view.
+
 ### Filtering
 - **Text filters** — each column header has a filter input; type to filter rows by that column
 - **Date range picker** — the Date column has From/To date inputs that query git directly, so filtering works across the full history without needing to scroll-load everything
@@ -31,10 +36,22 @@ When viewing a single file's log, comparing two revisions opens a direct diff of
 ### File History
 Right-click any file in the changed files list and select **Show File Log** to open a new log tab scoped to just that file.
 
+### Line History
+Select one or more lines in the editor, right-click, and choose **Show Line History**
+(also available from the Command Palette) to see just the commits that touched the
+currently selected line(s).
+
 ### Diff Viewer
 Double-click any file in the changed files list to compare it against its previous revision using VS Code's built-in diff editor. Works in both the log view and the compare revisions view.
 
 Right-click a file in the changed files list and select **Compare with Working Tree** to diff that revision of the file against the current contents on disk, including any uncommitted changes.
+
+Right-click a file and select **View File Contents** to open that file's content at the
+selected revision in a read-only tab, instead of only ever showing it as one side of a diff.
+
+### Folder View
+Right-click the changed files list and toggle **Folder View** to group the list by
+directory instead of showing a flat list.
 
 ### Blame View
 Right-click a file in the changed files list and select **Blame** to open an interactive blame view:
@@ -53,7 +70,8 @@ All views automatically adapt to your VS Code theme (dark, light, or high contra
 1. Open a git repository in VS Code
 2. Either:
    - In the Explorer sidebar, right-click any file or folder and select **Show Git Log**, or
-   - With a file open in the editor, right-click and select **Show Git Log**, or press **Ctrl+Alt+]** (**Cmd+Alt+]** on Mac)
+   - With a file open in the editor, right-click and select **Show Git Log**, or press **Ctrl+Alt+]** (**Cmd+Alt+]** on Mac), or
+   - Click the Git Log Viewer icon in the editor tab bar or the Source Control panel title
 
 ### Keyboard & Mouse
 
@@ -63,11 +81,19 @@ All views automatically adapt to your VS Code theme (dark, light, or high contra
 | Click commit | Select commit, show details and changed files |
 | Ctrl+Click commit | Multi-select (up to 2 commits for comparison) |
 | Right-click commit (2 selected) | Compare Selected Revisions |
+| Right-click commit | Branches |
 | Double-click file | Compare with previous revision |
-| Right-click file | Show File Log, Compare with Previous, Compare with Working Tree, Blame, Copy Path |
-| Right-click (commit list) | Refresh, Clear Filters |
+| Right-click file | Show File Log, Compare with Previous, Compare with Working Tree, View File Contents, Blame, Copy Path |
+| Right-click (changed files list) | Folder View, Clear Filters, Refresh |
+| Right-click (commit list) | Branches, Clear Filters, Refresh |
 | Drag column header edge | Resize column |
 | Double-click column header edge | Auto-expand column to fit content |
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|--------------|
+| `gitLogViewer.pageSize` | `100` | Number of commits to load per batch when scrolling the commit list. |
 
 ## Requirements
 

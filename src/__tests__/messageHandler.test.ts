@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createFixtureRepo, FixtureRepo } from './helpers/createFixtureRepo';
 import { GitService } from '../gitService';
-import { MessageHandler, MessageSender, DiffOpener, PanelCreator, GitActions } from '../messageHandler';
+import { MessageHandler, MessageSender, DiffOpener, PanelCreator } from '../messageHandler';
 import { InitialState } from '../types';
 
 let repo: FixtureRepo;
@@ -18,7 +18,7 @@ afterAll(() => {
 
 function createHandler(
     initialState: Partial<InitialState> = {},
-    overrides?: { sender?: MessageSender; diffOpener?: DiffOpener; panelCreator?: PanelCreator; gitActions?: GitActions },
+    overrides?: { sender?: MessageSender; diffOpener?: DiffOpener; panelCreator?: PanelCreator },
 ) {
     const sender: MessageSender = overrides?.sender || { postMessage: vi.fn() };
     const diffOpener: DiffOpener = overrides?.diffOpener || {
@@ -31,19 +31,13 @@ function createHandler(
         createComparePanel: vi.fn(),
         createFileLogPanel: vi.fn(),
     };
-    const gitActions: GitActions = overrides?.gitActions || {
-        cherryPick: vi.fn().mockResolvedValue(true),
-        revertCommit: vi.fn().mockResolvedValue(true),
-        createBranch: vi.fn().mockResolvedValue(true),
-        createTag: vi.fn().mockResolvedValue(true),
-    };
     const state: InitialState = {
         mode: 'log',
         targetPath: repo.repoRoot,
         ...initialState,
     };
-    const handler = new MessageHandler(gitService, sender, diffOpener, panelCreator, gitActions, repo.repoRoot, state);
-    return { handler, sender, diffOpener, panelCreator, gitActions };
+    const handler = new MessageHandler(gitService, sender, diffOpener, panelCreator, repo.repoRoot, state);
+    return { handler, sender, diffOpener, panelCreator };
 }
 
 describe('requestCommits', () => {
@@ -379,122 +373,6 @@ describe('requestBlameData', () => {
     });
 });
 
-describe('cherryPick', () => {
-    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn().mockResolvedValue(true),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn(),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
-
-        expect(gitActions.cherryPick).toHaveBeenCalledWith('abc123');
-        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
-    });
-
-    it('does not post gitActionCompleted when cancelled or failed', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn().mockResolvedValue(false),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn(),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
-
-        expect(sender.postMessage).not.toHaveBeenCalled();
-    });
-});
-
-describe('revertCommit', () => {
-    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn().mockResolvedValue(true),
-            createBranch: vi.fn(),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'revertCommit', sha: 'def456' });
-
-        expect(gitActions.revertCommit).toHaveBeenCalledWith('def456');
-        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
-    });
-
-    it('does not post gitActionCompleted when it fails', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn().mockResolvedValue(false),
-            createBranch: vi.fn(),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'revertCommit', sha: 'def456' });
-
-        expect(sender.postMessage).not.toHaveBeenCalled();
-    });
-});
-
-describe('createBranch', () => {
-    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn().mockResolvedValue(true),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'createBranch', sha: 'aaa111' });
-
-        expect(gitActions.createBranch).toHaveBeenCalledWith('aaa111');
-        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
-    });
-
-    it('does not post gitActionCompleted when the input box is cancelled', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn().mockResolvedValue(false),
-            createTag: vi.fn(),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'createBranch', sha: 'aaa111' });
-
-        expect(sender.postMessage).not.toHaveBeenCalled();
-    });
-});
-
-describe('createTag', () => {
-    it('delegates to gitActions and posts gitActionCompleted when it succeeds', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn(),
-            createTag: vi.fn().mockResolvedValue(true),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'createTag', sha: 'bbb222' });
-
-        expect(gitActions.createTag).toHaveBeenCalledWith('bbb222');
-        expect(sender.postMessage).toHaveBeenCalledWith({ type: 'gitActionCompleted' });
-    });
-
-    it('does not post gitActionCompleted when the input box is cancelled', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn(),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn(),
-            createTag: vi.fn().mockResolvedValue(false),
-        };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'createTag', sha: 'bbb222' });
-
-        expect(sender.postMessage).not.toHaveBeenCalled();
-    });
-});
-
 describe('error handling', () => {
     it('posts error message on handler failure', async () => {
         const { handler, sender } = createHandler();
@@ -511,14 +389,13 @@ describe('error handling', () => {
     });
 
     it('stringifies a non-Error thrown value rather than reading .message off it', async () => {
-        const gitActions: GitActions = {
-            cherryPick: vi.fn().mockRejectedValue('a plain string rejection, not an Error'),
-            revertCommit: vi.fn(),
-            createBranch: vi.fn(),
-            createTag: vi.fn(),
+        const panelCreator: PanelCreator = {
+            createBlamePanel: vi.fn(() => { throw 'a plain string rejection, not an Error'; }),
+            createComparePanel: vi.fn(),
+            createFileLogPanel: vi.fn(),
         };
-        const { handler, sender } = createHandler({}, { gitActions });
-        await handler.handle({ type: 'cherryPick', sha: 'abc123' });
+        const { handler, sender } = createHandler({}, { panelCreator });
+        await handler.handle({ type: 'blame', sha: 'abc123', filePath: 'x.ts' });
 
         const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
         expect(msg.type).toBe('error');

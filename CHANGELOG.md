@@ -14,8 +14,6 @@ like `v0.5.0`, and each one gets its own section below.
 - **Branches submenu** — scope the commit list to specific branches (multi-select) or
   all branches, instead of just the checked-out branch, via a "Branches" item on the
   commit list's right-click menu.
-- **Cherry-pick, Revert Commit, Create Branch, Create Tag** — new right-click actions on
-  a selected commit.
 - **View Line History** — a new "Show Line History" command (editor right-click menu and
   Command Palette) shows the history of just the currently selected line(s).
 - **View File Contents** — a new action in the changed-files context menu opens a file's
