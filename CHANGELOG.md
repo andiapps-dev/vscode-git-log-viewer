@@ -41,8 +41,8 @@ like `v0.5.0`, and each one gets its own section below.
 
 ### Changed
 
-- Updated dependencies: `vitest` and `@vitest/coverage-v8` to 4.1.10, `esbuild` to
-  0.28.1, `@types/node` to 26.1.2, `c8` to 12.0.0, and the `actions/checkout`,
+- Updated dependencies: `vitest` to 4.1.10, `@vitest/coverage-v8` to 4.1.11, `esbuild` to
+  0.28.2, `@types/node` to 26.1.2, `c8` to 12.0.0, and the `actions/checkout`,
   `actions/setup-node`, `actions/upload-artifact`, `actions/download-artifact`, and
   `softprops/action-gh-release` GitHub Actions to their latest majors.
 - `vitest.config.ts` → `vitest.config.mts`, and dropped `__dirname` in favor of
