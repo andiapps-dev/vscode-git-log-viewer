@@ -126,7 +126,7 @@
     "@types/vscode": "^1.85.0",
     "@types/node": "^26.1.2",
     "typescript": "^5.4.0",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "@vscode/vsce": "^3.9.0",
     "vitest": "^4.1.10",
     "@vitest/coverage-v8": "^4.1.10",
