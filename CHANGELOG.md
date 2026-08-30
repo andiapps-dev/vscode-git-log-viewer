@@ -7,7 +7,7 @@ like `v0.5.0`, and each one gets its own section below.
 
 ## [Unreleased]
 
-## [0.4.10] - 2026-08-07
+## [0.4.10] - 2026-08-30
 
 ### Added
 
