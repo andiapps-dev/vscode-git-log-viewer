@@ -11,8 +11,8 @@ const SEP = '\x1e';
 describe('parseLogOutput', () => {
     it('parses standard log output', () => {
         const out = [
-            `abc123${SEP}abc1234${SEP}Fix bug${SEP}Alice${SEP}2026-06-17T10:00:00-04:00${SEP}HEAD -> main`,
-            `def456${SEP}def4567${SEP}Add feature${SEP}Bob${SEP}2026-06-16T09:00:00-04:00${SEP}`,
+            `abc123${SEP}abc1234${SEP}Fix bug${SEP}Alice${SEP}2026-06-17T10:00:00-04:00${SEP}HEAD -> main${SEP}def456`,
+            `def456${SEP}def4567${SEP}Add feature${SEP}Bob${SEP}2026-06-16T09:00:00-04:00${SEP}${SEP}`,
         ].join('\n');
 
         const result = parseLogOutput(out);
@@ -24,6 +24,7 @@ describe('parseLogOutput', () => {
             authorName: 'Alice',
             authorDate: '2026-06-17T10:00:00-04:00',
             refs: 'HEAD -> main',
+            parentHashes: ['def456'],
         });
         expect(result[1].authorName).toBe('Bob');
         expect(result[1].refs).toBe('');
@@ -35,15 +36,27 @@ describe('parseLogOutput', () => {
     });
 
     it('handles subjects with special characters', () => {
-        const out = `abc${SEP}abc${SEP}Fix "quotes" & <tags>${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}`;
+        const out = `abc${SEP}abc${SEP}Fix "quotes" & <tags>${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}${SEP}`;
         const result = parseLogOutput(out);
         expect(result[0].subject).toBe('Fix "quotes" & <tags>');
     });
 
     it('parses refs with tags and branches', () => {
-        const out = `abc${SEP}abc${SEP}Release${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}tag: v1.0, origin/main, main`;
+        const out = `abc${SEP}abc${SEP}Release${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}tag: v1.0, origin/main, main${SEP}`;
         const result = parseLogOutput(out);
         expect(result[0].refs).toBe('tag: v1.0, origin/main, main');
+    });
+
+    it('parses a root commit as having no parent hashes', () => {
+        const out = `abc${SEP}abc${SEP}Initial commit${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}${SEP}`;
+        const result = parseLogOutput(out);
+        expect(result[0].parentHashes).toEqual([]);
+    });
+
+    it('parses a merge commit as having multiple parent hashes', () => {
+        const out = `abc${SEP}abc${SEP}Merge branch 'feature'${SEP}Alice${SEP}2026-01-01T00:00:00Z${SEP}${SEP}def456 ghi789`;
+        const result = parseLogOutput(out);
+        expect(result[0].parentHashes).toEqual(['def456', 'ghi789']);
     });
 });
 

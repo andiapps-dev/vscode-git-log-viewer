@@ -455,6 +455,22 @@ demo_click 1
 sleep 1.3
 stop_capture
 
+# --- Segment 2b: the commit graph shows branch history at a glance, with
+# details on hover ---
+# hover_graph_dot drives the actual hover through CDP, not the real cursor
+# alone - see its comment in winsafe.sh for why a synthetic xdotool mouse
+# move doesn't reliably fire the real mouseover event the tooltip's JS
+# listener depends on. x=560 here just puts the visible cursor roughly over
+# the commit list's graph column (well to the left of the SHA-1 column) for
+# the recording itself.
+add_title "See branch history at a glance, with details on hover"
+start_capture
+hover_graph_dot 560 "$(row_y 1)" 1
+sleep 2.2
+unhover_graph_dot 1
+sleep 0.3
+stop_capture
+
 # --- Segment 3: compare two selected revisions ---
 add_title "Compare two selected revisions"
 start_capture
@@ -717,8 +733,9 @@ webview_set_filter "path" ""
 # --- Segment 12: filter to a single branch ---
 # feature/rate-limit-docs is a local-only branch (never pushed) created
 # specifically for this demo - see demo/README.md - so it's guaranteed to
-# exist and to have exactly one commit not on master, giving this something
-# real to filter down to.
+# exist, with commits not on master, giving this something real to filter
+# down to. Its own tip is a real merge commit, so this segment's graph
+# column shows an actual fork/merge shape too, not just a single dot.
 #
 # The submenu ITSELF (picking a branch out of it) is driven via CDP, not a
 # mouse click at a screen coordinate - see click_branches_submenu_item() in
@@ -757,6 +774,25 @@ sleep 1.8
 # branches' commits together) with no extra dismiss step needed.
 click_branches_submenu_item "All" 1080 228
 sleep 1.8
+# feature/rate-limit-docs's own tip is a real merge (see demo/README.md) -
+# once combined with master via "All", the graph shows the actual fork:
+# row 1 (docs) and row 2 (faq) each on their own lane, both converging back
+# into row 3 (master's a3714473 - the real shared ancestor both commits'
+# own %P already points at, matching this repo's real history exactly).
+# Hovering all three in turn shows genuinely different tooltip content, not
+# just the same info restated - row 3 in particular is reachable from BOTH
+# branches, which its "Branches:" pills show and rows 1/2 (each on just the
+# one branch) don't. Verified live via dev-session.sh before hardcoding
+# these row/position numbers - see hover_graph_dot's comment in winsafe.sh
+# for why the hover itself goes through CDP rather than xdotool alone.
+hover_graph_dot 560 "$(row_y 1)" 1
+sleep 1.6
+hover_graph_dot 560 "$(row_y 2)" 2
+sleep 1.6
+hover_graph_dot 560 "$(row_y 3)" 3
+sleep 1.8
+unhover_graph_dot 3
+sleep 0.3
 stop_capture
 
 # --- Segment 14: also reachable from the Source Control view ---

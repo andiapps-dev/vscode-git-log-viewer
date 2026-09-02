@@ -42,12 +42,16 @@ pinned commit and the fixture branch at startup and fails loudly with a
 pointer back to this script if either is missing.
 
 The fixture branch is `feature/rate-limit-docs` (local-only, never pushed
-anywhere) - a single self-contained commit that gives the Branches-filter
-segments (scoping the log to just this branch, then combining it with
-master via "All") something real to filter down to. It deliberately touches
-`package.json` itself (the same file the demo's log view is scoped to, so
-the commit is actually visible/selectable there) alongside a new docs file
-that nothing else in history also touches.
+anywhere) - it gives the Branches-filter segments (scoping the log to just
+this branch, then combining it with master via "All") something real to
+filter down to, and its own tip is a real merge commit (two independent
+commits merged together), entirely contained within the branch - master's
+own history is never touched - so the commit graph has an actual
+branch/merge shape to show, not just a straight line. One of its two
+parent commits deliberately touches `package.json` itself (the same file
+the demo's log view is scoped to, so it's actually visible/selectable
+there) alongside a new docs file; the other touches a second, unrelated
+new docs file, so merging them never has anything to actually conflict on.
 
 ## What it does
 

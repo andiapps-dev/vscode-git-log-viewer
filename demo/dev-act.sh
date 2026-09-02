@@ -18,6 +18,8 @@
 #   webview_eval JS         - run JS inside the Git Log webview via CDP, print its return value
 #   webview_set_filter COL VALUE - set a column filter input's value via CDP
 #   branches_click TEXT [X Y]     - click a Branches submenu item via CDP (optional real-mouse hover first)
+#   hover_dot X Y ROW      - hover a commit row's graph dot via CDP (real-mouse move to X Y too) to trigger its tooltip
+#   unhover_dot ROW         - dismiss the tooltip hover_dot triggered
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/winsafe.sh"
@@ -36,5 +38,7 @@ case "$cmd" in
     webview_eval) webview_eval "$1" ;;
     webview_set_filter) webview_set_filter "$1" "$2" ;;
     branches_click) click_branches_submenu_item "$1" "${2:-}" "${3:-}" ;;
+    hover_dot) hover_graph_dot "$1" "$2" "$3" ;;
+    unhover_dot) unhover_graph_dot "$1" ;;
     *) echo "unknown action: $cmd" >&2; exit 1 ;;
 esac

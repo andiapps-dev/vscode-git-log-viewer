@@ -138,6 +138,36 @@ describe('getLog', () => {
             const withFollow = await git.getLog(repo.repoRoot, dir, 0, 500, undefined, undefined, true);
             expect(withFollow.length).toBe(withoutFollow.length);
         });
+
+        it('paginates a followRenames query without returning the same commit on more than one page', async () => {
+            // git log --follow --skip=N is unreliable on its own (--follow's
+            // rename-tracking doesn't compose correctly with --skip) -
+            // getLog() works around this by fetching the whole --follow
+            // history in one shot and paginating the result itself, rather
+            // than asking git to skip. A small page size against a file with
+            // more history than that guarantees multiple pages regardless
+            // of the fixture's exact commit count.
+            const renamedFile = 'src/services/authentication.ts';
+            const pageSize = 3;
+            const page1 = await git.getLog(repo.repoRoot, renamedFile, 0, pageSize, undefined, undefined, true);
+            const page2 = await git.getLog(repo.repoRoot, renamedFile, pageSize, pageSize, undefined, undefined, true);
+            expect(page1.length).toBe(pageSize);
+            expect(page2.length).toBeGreaterThan(0);
+
+            const page1Hashes = new Set(page1.map(c => c.hash));
+            for (const c of page2) {
+                expect(page1Hashes.has(c.hash)).toBe(false);
+            }
+
+            // The two pages back-to-back should exactly match the file's
+            // real, complete --follow history in order - not just "no
+            // overlap" (which duplicate-but-shuffled results could also
+            // satisfy).
+            const combined = page1.concat(page2).map(c => c.hash);
+            const full = rawGit(['log', '--format=%H', '--follow', '--', renamedFile])
+                .split('\n').filter(Boolean).slice(0, combined.length);
+            expect(combined).toEqual(full);
+        });
     });
 
     describe('date filtering', () => {
@@ -573,6 +603,27 @@ describe('listBranches', () => {
         // up specifically so this case is exercised, not just assumed absent.
         const branches = await git.listBranches(repo.repoRoot);
         expect(branches).not.toContain('origin');
+    });
+});
+
+describe('getContainingRefs', () => {
+    it('includes a branch the commit is actually reachable from', async () => {
+        const { branches } = await git.getContainingRefs(repo.repoRoot, repo.commits['foundation-0']);
+        expect(branches).toContain('main');
+    });
+
+    it('excludes a branch the commit was never merged into', async () => {
+        // unmerged-preview only ever exists on experimental/preview - real
+        // reachability (--contains), not just "does some ref happen to
+        // point directly at it".
+        const { branches } = await git.getContainingRefs(repo.repoRoot, repo.commits['unmerged-preview']);
+        expect(branches).toContain('experimental/preview');
+        expect(branches).not.toContain('main');
+    });
+
+    it('includes a tag actually reachable from the commit', async () => {
+        const { tags } = await git.getContainingRefs(repo.repoRoot, repo.commits['tag-v1.0']);
+        expect(tags).toContain('v1.0');
     });
 });
 
