@@ -41,17 +41,44 @@ just "please don't run that here." `record-demo.sh` checks for both the
 pinned commit and the fixture branch at startup and fails loudly with a
 pointer back to this script if either is missing.
 
-The fixture branch is `feature/rate-limit-docs` (local-only, never pushed
-anywhere) - it gives the Branches-filter segments (scoping the log to just
-this branch, then combining it with master via "All") something real to
-filter down to, and its own tip is a real merge commit (two independent
-commits merged together), entirely contained within the branch - master's
-own history is never touched - so the commit graph has an actual
-branch/merge shape to show, not just a straight line. One of its two
-parent commits deliberately touches `package.json` itself (the same file
-the demo's log view is scoped to, so it's actually visible/selectable
-there) alongside a new docs file; the other touches a second, unrelated
-new docs file, so merging them never has anything to actually conflict on.
+There are 5 fixture branches (local-only, never pushed anywhere), all
+forking from the exact same point (master's pinned commit) so that
+combining them via "All" produces a genuinely busy graph - several
+distinct colored lanes fanning out from one shared row, not just a single
+fork or a straight line. `feature/rate-limit-docs` alone gives the
+single-branch Branches-filter segment something real to filter down to;
+combined with the other 4 via "All", the graph and hover-tooltip segments
+have several different lines to show, each with meaningfully different
+tooltip content.
+
+`feature/rate-limit-docs`'s own tip is a real merge commit (two
+independent commits, `feature/rate-limit-docs-faq`'s and its own, merged
+together), entirely contained within the branch - master's own history is
+never touched. Every fixture commit (both of that merge's parents, and
+each of the other 4 branches' single commits) deliberately touches
+`package.json` itself, each on its own distinct, previously-unused line of
+the `keywords` array - so every one is actually visible/selectable in the
+demo's package.json-scoped log, and none of their diffs conflict with each
+other. Each commit also gets an explicit, fixed `GIT_AUTHOR_DATE`/
+`GIT_COMMITTER_DATE` (one minute apart, safely after master's own real
+commit date) rather than whatever the wall clock reads when the script
+happens to run - `git log`'s default order is reverse-chronological by
+commit date, so this is what makes the resulting row order (and every
+hardcoded `row_y()` position in record-demo.sh that depends on it) exactly
+reproducible from one run to the next.
+
+One thing to know if this ever needs revisiting: `--follow` (used
+whenever the demo's log view is scoped to a single file, which it always
+is here) drops a merge commit entirely from its own output - a known git
+limitation, unrelated to how "interesting" the merge's own diff is, and
+present even for a plain two-parent merge with nothing else going on.
+`feature/rate-limit-docs`'s merge commit itself is therefore never one of
+the rows the demo can hover - only its two parents are, individually, and
+both still correctly show "reachable from feature/rate-limit-docs" on
+hover despite neither being a branch tip on its own. Confirmed directly
+against the CLI command record-demo.sh's own `getLog()` call builds
+(`git log --follow --all -- package.json`, with and without `--all`) before
+relying on it here.
 
 ## What it does
 

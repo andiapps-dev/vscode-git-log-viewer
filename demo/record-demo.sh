@@ -182,11 +182,13 @@ if ! git -C "$DEMO_REPO" cat-file -e "$PINNED_DEMO_SHA" 2>/dev/null; then
     echo "setup-demo-repo.sh. Recreate it: $SCRIPT_DIR/setup-demo-repo.sh $DEMO_REPO" >&2
     exit 1
 fi
-if ! git -C "$DEMO_REPO" rev-parse --verify -q feature/rate-limit-docs >/dev/null 2>&1; then
-    echo "FATAL: $DEMO_REPO has no feature/rate-limit-docs branch (needed by the" >&2
-    echo "Branches-filter segment). Recreate it: $SCRIPT_DIR/setup-demo-repo.sh $DEMO_REPO" >&2
-    exit 1
-fi
+for b in feature/rate-limit-docs feature/caching-docs feature/websocket-docs feature/security-headers-docs; do
+    if ! git -C "$DEMO_REPO" rev-parse --verify -q "$b" >/dev/null 2>&1; then
+        echo "FATAL: $DEMO_REPO has no $b branch (needed by the Branches-filter" >&2
+        echo "segment). Recreate it: $SCRIPT_DIR/setup-demo-repo.sh $DEMO_REPO" >&2
+        exit 1
+    fi
+done
 
 # A previous run that got killed mid-script (Ctrl+C, crash, ...) can leave
 # $DEMO_REPO stuck mid-operation - e.g. the throwaway edit's cleanup trap
@@ -734,8 +736,11 @@ webview_set_filter "path" ""
 # feature/rate-limit-docs is a local-only branch (never pushed) created
 # specifically for this demo - see demo/README.md - so it's guaranteed to
 # exist, with commits not on master, giving this something real to filter
-# down to. Its own tip is a real merge commit, so this segment's graph
-# column shows an actual fork/merge shape too, not just a single dot.
+# down to. Its own tip is a real merge commit, so filtered to just this
+# branch the graph column shows 2 lanes forking from master rather than a
+# single dot - both of the merge's own parent commits, individually
+# (--follow drops the merge commit itself from its own output; see
+# demo/README.md for why).
 #
 # The submenu ITSELF (picking a branch out of it) is driven via CDP, not a
 # mouse click at a screen coordinate - see click_branches_submenu_item() in
@@ -774,24 +779,47 @@ sleep 1.8
 # branches' commits together) with no extra dismiss step needed.
 click_branches_submenu_item "All" 1080 228
 sleep 1.8
-# feature/rate-limit-docs's own tip is a real merge (see demo/README.md) -
-# once combined with master via "All", the graph shows the actual fork:
-# row 1 (docs) and row 2 (faq) each on their own lane, both converging back
-# into row 3 (master's a3714473 - the real shared ancestor both commits'
-# own %P already points at, matching this repo's real history exactly).
-# Hovering all three in turn shows genuinely different tooltip content, not
-# just the same info restated - row 3 in particular is reachable from BOTH
-# branches, which its "Branches:" pills show and rows 1/2 (each on just the
-# one branch) don't. Verified live via dev-session.sh before hardcoding
-# these row/position numbers - see hover_graph_dot's comment in winsafe.sh
-# for why the hover itself goes through CDP rather than xdotool alone.
+# 5 independent fixture branches (feature/rate-limit-docs, its own tip a
+# real merge of feature/rate-limit-docs-faq; feature/caching-docs;
+# feature/websocket-docs; feature/security-headers-docs - see
+# demo/README.md) all fork from the exact same point, master's a3714473.
+# Combined with master via "All", that's 5 distinct colored lanes fanning
+# out from one shared row, genuinely busy rather than just a single
+# fork - not a straight line anywhere. --follow (this view is scoped to
+# package.json) drops the merge commit itself as its own row - a known git
+# limitation, --follow does not compose with merges - but both commits it
+# merged (rows 4 and 5 below) are still individually present and still
+# correctly show "reachable from feature/rate-limit-docs" on hover despite
+# neither being a branch tip itself, which is exactly the kind of real
+# containment info (not just what's visible elsewhere in the row) this
+# tooltip exists to surface.
+#
+# Row layout (verified live via dev-session.sh before hardcoding any of
+# this - see hover_graph_dot's comment in winsafe.sh for why the hover
+# itself goes through CDP rather than xdotool alone):
+#   row 1 ac574847 feature/security-headers-docs (own tip, single branch)
+#   row 2 7a4330d8 feature/websocket-docs         (own tip, single branch)
+#   row 3 69dd19f9 feature/caching-docs           (own tip, single branch)
+#   row 4 74967783 (rate-limit-docs-faq's commit, no branch tip of its own)
+#   row 5 aecc064a (rate-limit-docs's own first commit, ditto)
+#   row 6 a3714473 master - the shared ancestor every lane above forks from
+# Hovering rows 1, 3, 5, and 6 in turn shows genuinely different tooltip
+# content each time, not just the same info restated: row 1 and row 3 are
+# each reachable from just their own single branch; row 5 is reachable
+# from feature/rate-limit-docs despite showing no branch pill in the
+# Message column at all (real containment via the merge, not just what's
+# already visible in the row); row 6 is reachable from all 5 at once, its
+# "Branches:" pills wrapping across two lines - the richest tooltip in the
+# whole graph, and nowhere else in the UI shows that at a glance.
 hover_graph_dot 560 "$(row_y 1)" 1
-sleep 1.6
-hover_graph_dot 560 "$(row_y 2)" 2
-sleep 1.6
+sleep 1.9
 hover_graph_dot 560 "$(row_y 3)" 3
-sleep 1.8
-unhover_graph_dot 3
+sleep 1.9
+hover_graph_dot 560 "$(row_y 5)" 5
+sleep 1.9
+hover_graph_dot 560 "$(row_y 6)" 6
+sleep 2.2
+unhover_graph_dot 6
 sleep 0.3
 stop_capture
 
