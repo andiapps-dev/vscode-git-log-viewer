@@ -252,6 +252,66 @@ webview_set_filter() {
     " | grep -q '"OK"' || echo "  WARNING: no filter input found for data-col=\"$data_col\"" >&2
 }
 
+# Hovers a specific commit row's graph-column dot to trigger its tooltip.
+# Combines a REAL xdotool mouse move to (x, y) - so the recorded video
+# shows the cursor actually near the dot - with a CDP-dispatched genuine
+# `mouseover` DOM event on that row's dot, since a synthetic xdotool pointer
+# warp doesn't reliably fire the real mouseover event the tooltip's JS
+# listener depends on (confirmed directly while testing it: CSS :hover
+# state can update from a synthetic warp, but the DOM event itself doesn't
+# reliably follow) - same reasoning as click_branches_submenu_item's CDP-
+# driven click below, just for hover instead of click.
+#
+# $1 $2: window-relative x y for the real cursor move (cosmetic - see
+#        above; doesn't need to land exactly on the dot for the hover
+#        itself to register, since that part goes through CDP regardless).
+# $3: 1-based row index (among currently rendered .data-row rows) whose
+#     graph dot to hover.
+#
+# The dispatched event's own clientX/clientY - what main.ts's tooltip
+# positioning actually reads, separate from $1/$2's real cursor move above -
+# come from the dot's own getBoundingClientRect(), not $1/$2 themselves:
+# $1/$2 are OUTER WINDOW coordinates (for xdotool), while clientX/clientY
+# need to be WEBVIEW-relative (the iframe's own coordinate space) - the two
+# only coincide by accident, if at all. A plain `new w.MouseEvent(...)`
+# with neither set defaults both to 0, which doesn't error (nothing
+# requires them) but silently pins the tooltip to the webview's top-left
+# corner regardless of which row was hovered - caught by checking the
+# tooltip's actual position live, not just that a tooltip showed up at all.
+hover_graph_dot() {
+    local x="$1" y="$2" row_index="$3"
+    demo_mousemove "$x" "$y"
+    webview_eval "
+        const rows = d.querySelectorAll('#commit-tbody tr.data-row');
+        const row = rows[$row_index - 1];
+        if (!row) return 'NOT_FOUND';
+        const dot = row.querySelector('td.col-graph svg circle');
+        if (!dot) return 'NO_DOT';
+        const rect = dot.getBoundingClientRect();
+        dot.dispatchEvent(new w.MouseEvent('mouseover', {
+            bubbles: true,
+            clientX: rect.x + rect.width / 2,
+            clientY: rect.y + rect.height / 2,
+        }));
+        return 'OK';
+    " | grep -q '"OK"' || echo "  WARNING: no graph dot found at row $row_index to hover" >&2
+}
+
+# Dismisses the tooltip hover_graph_dot triggered, so it doesn't linger
+# into whatever segment records next - the tooltip's hide is instant (no
+# fade-out), so this just needs to run once, right before stop_capture.
+# $1: same row index passed to the matching hover_graph_dot call.
+unhover_graph_dot() {
+    local row_index="$1"
+    webview_eval "
+        const rows = d.querySelectorAll('#commit-tbody tr.data-row');
+        const row = rows[$row_index - 1];
+        const dot = row ? row.querySelector('td.col-graph svg circle') : null;
+        if (dot) dot.dispatchEvent(new w.MouseEvent('mouseout', { bubbles: true }));
+        return 'OK';
+    " >/dev/null || true
+}
+
 # Opens the Branches submenu (from an already-open, exactly-one-commit-
 # selected commit-context-menu - the click that opens THAT is a normal
 # xdotool right-click elsewhere in this script, unaffected by any of this)

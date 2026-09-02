@@ -1,4 +1,5 @@
 import { sortArray, statusClass, statusLabel, escapeHtml, formatDate, formatTimeAgo } from './utils';
+import { buildCommitGraph, GraphRow } from './graph';
 
 declare function acquireVsCodeApi(): {
     postMessage(msg: unknown): void;
@@ -13,6 +14,7 @@ interface Commit {
     authorName: string;
     authorDate: string;
     refs: string;
+    parentHashes: string[];
 }
 
 interface CommitDetail {
@@ -50,6 +52,11 @@ const vscode = acquireVsCodeApi();
 const state: InitialState = (window as unknown as { initialState: InitialState }).initialState;
 
 let allCommits: Commit[] = [];
+// Only ever populated for a path-scoped view's first page (see
+// renderCommitGraph()'s use of it) - real, unscoped parent-hash data the
+// commit graph needs to connect around commits `allCommits` itself never
+// returns. Stays empty for the main (unscoped) log, which never needs it.
+let graphEdges: Commit[] = [];
 let allFiles: FileChange[] = [];
 const selectedCommitShas: string[] = [];
 let fileListCommitSha: string | null = null;
@@ -109,6 +116,14 @@ function renderCommits(): void {
         }
         tr.dataset.sha = commit.hash;
 
+        // Populated by renderCommitGraph() below, after this loop and after
+        // any active filter has been (re)applied - it needs to know which
+        // rows ended up filtered-out before it can decide what's "included"
+        // for the graph, and that's DOM state this loop hasn't produced yet.
+        const tdGraph = document.createElement('td');
+        tdGraph.className = 'col-graph';
+        tr.appendChild(tdGraph);
+
         const tdSha = document.createElement('td');
         tdSha.className = 'col-sha';
         tdSha.textContent = commit.shortHash;
@@ -156,7 +171,358 @@ function renderCommits(): void {
     }
     if (hasActiveFilters()) {
         applyFilters(false);
+    } else {
+        // applyFilters() (below) is what calls renderCommitGraph() after it
+        // updates filtered-out state - with no active filter it never runs
+        // above, so the graph still needs building here.
+        renderCommitGraph(sorted);
     }
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const GRAPH_LANE_WIDTH = 14;
+// Real DEFAULT_ROW_HEIGHT is only the pre-first-render fallback - actual
+// rendering always uses a value measured fresh off a real row (see
+// renderCommitGraph), since row height depends on the user's font-size
+// setting and isn't something to hardcode.
+const DEFAULT_ROW_HEIGHT = 22;
+
+function laneX(lane: number): number {
+    return lane * GRAPH_LANE_WIDTH + GRAPH_LANE_WIDTH / 2;
+}
+
+// A straight-line diagonal reads as a sharp kink at every row it crosses
+// through, even where the geometry is mathematically continuous (see
+// appendGraphCurve below for how the halves themselves join seamlessly) -
+// an S-curve reads as one smooth lane change instead. The curve's control
+// points sit directly above/below its own endpoints (same x, at the
+// vertical midpoint) rather than pulled toward the opposite endpoint - that
+// makes the tangent AT each endpoint perfectly vertical, so a straight
+// passthrough segment butting up against this curve (or this curve's other
+// half, across the row boundary) meets it with no visible direction change.
+// A same-lane segment (x1 === x2) degenerates to a straight vertical line
+// automatically - the control points collapse onto the line itself - so
+// this is safe to use unconditionally rather than special-casing straight
+// runs separately.
+function appendGraphCurve(svg: SVGSVGElement, x1: number, y1: number, x2: number, y2: number, color: string): void {
+    const midY = (y1 + y2) / 2;
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY} ${x2} ${midY} ${x2} ${y2}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(path);
+}
+
+// data-sha (not a native <title>) is what lets the hover-tooltip listener
+// (delegated on commitTbody - see setupGraphTooltip) identify which commit
+// a given dot represents. A native title tooltip can only show static text
+// set up front; this dot's tooltip content (which branches/tags contain
+// it) needs an on-demand git query per hover, so it has to be a custom
+// element that can start in a loading state and fill in asynchronously.
+function appendGraphDot(svg: SVGSVGElement, x: number, y: number, r: number, color: string, sha: string, parentHashes: string[]): void {
+    const circle = document.createElementNS(SVG_NS, 'circle');
+    circle.setAttribute('cx', String(x));
+    circle.setAttribute('cy', String(y));
+    circle.setAttribute('r', String(r));
+    circle.setAttribute('fill', color);
+    // Plain attributes rather than .dataset - SVGElement.dataset write
+    // support is inconsistent enough (including in the jsdom test
+    // environment) not to rely on, where a plain data-* attribute works
+    // universally for both setting and reading back. data-parents carries
+    // the tooltip's parent-hash line without needing a commitsByHash
+    // lookup at hover time (that map is local to renderCommitGraph()).
+    circle.setAttribute('data-sha', sha);
+    circle.setAttribute('data-parents', parentHashes.join(','));
+    svg.appendChild(circle);
+}
+
+/**
+ * Builds one row's graph cell. Each row's SVG only spans that row's own
+ * height, but a diagonal (branch/merge) segment visually crosses a row
+ * boundary - so a segment gets drawn as two halves, one by the row it
+ * belongs to (its lower half, ending at the boundary) and one by the row
+ * below it (that same segment's upper half, starting at the boundary).
+ * Both halves are anchored to the same midpoint x (the average of the
+ * segment's two lane positions) so they meet with no visible seam - see
+ * `ownSegments`/`incomingSegments` below for which half is whose job.
+ *
+ * The viewBox is set to the row's REAL pixel dimensions (rowHeight is
+ * measured off an actual row - see renderCommitGraph), not an abstract 0..1
+ * box stretched to fit via preserveAspectRatio="none". Non-uniform
+ * stretching scales x and y differently, which distorts stroke geometry
+ * along with the path itself - a round linecap/join becomes elliptical,
+ * most visibly right at a curve's bend where the local tangent direction
+ * is neither purely horizontal nor vertical. Matching the viewBox to real
+ * pixels 1:1 keeps stroke width and rounding uniform in both directions.
+ */
+function buildGraphCellSvg(row: GraphRow, incomingSegments: GraphRow['segments'], laneCount: number, rowHeight: number, commit: Commit): SVGSVGElement {
+    const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+    svg.setAttribute('viewBox', `0 0 ${laneCount * GRAPH_LANE_WIDTH} ${rowHeight}`);
+    svg.classList.add('commit-graph-svg');
+
+    const midY = rowHeight / 2;
+
+    // Upper half: segments entering from the row above, ending at their
+    // shared midpoint with that row's own lower half.
+    for (const seg of incomingSegments) {
+        const fromX = laneX(seg.fromLane);
+        const toX = laneX(seg.toLane);
+        const midX = (fromX + toX) / 2;
+        appendGraphCurve(svg, midX, 0, toX, midY, seg.color);
+    }
+    // Lower half: this row's own segments, starting at this row's node/
+    // passthrough position and ending at the midpoint the row below
+    // continues from.
+    for (const seg of row.segments) {
+        const fromX = laneX(seg.fromLane);
+        const toX = laneX(seg.toLane);
+        const midX = (fromX + toX) / 2;
+        appendGraphCurve(svg, fromX, midY, midX, rowHeight, seg.color);
+    }
+
+    // A dot marks "a commit happened here" - a passthrough lane doesn't
+    // have one on this row (its own commit is elsewhere), so it stays a
+    // plain line with no dot. Exactly one dot per row: the row's own
+    // commit.
+    appendGraphDot(svg, laneX(row.lane), midY, GRAPH_LANE_WIDTH * 0.32, row.color, commit.hash, commit.parentHashes);
+
+    return svg;
+}
+
+/**
+ * Draws the commit-graph column into the rows renderCommits() already
+ * built. Split out on its own (rather than inlined at the end of
+ * renderCommits()) because it also has to re-run on plain filtering, which
+ * never calls renderCommits() itself - see applyFilters()'s call to this.
+ *
+ * Only meaningful in git's own log order - sorting by Author or Date would
+ * draw lines between rows that aren't actually adjacent in the real
+ * history, which is worse than no graph at all, so a non-default sort just
+ * hides the column entirely rather than drawing a misleading one.
+ */
+function renderCommitGraph(sorted: Commit[]): void {
+    const table = document.getElementById('commit-table');
+    // Unreachable in practice: both call sites (renderCommits(), and
+    // applyFilters()'s log-mode branch) only ever run once #commit-table's
+    // static HTML - which always includes both #commit-table itself and
+    // commitTbody (#commit-tbody) together - has already been parsed into
+    // the DOM. Left in as a guard against a future call site that isn't
+    // guaranteed that, rather than assuming there can never be one.
+    /* v8 ignore next */
+    if (!table || !commitTbody) return;
+
+    // Line History's commits are a line's own provenance, not commit
+    // topology - git's -L mode isn't designed to be graphed (unlike a
+    // plain path-scoped log, whose commits are still real DAG nodes just
+    // filtered down to ones that touched that path). Hidden here rather
+    // than fetching graphEdges support for it server-side too.
+    if (state.lineStart && state.lineEnd) {
+        table.classList.add('graph-hidden');
+        return;
+    }
+
+    if (commitSortColumn !== null) {
+        table.classList.add('graph-hidden');
+        return;
+    }
+    table.classList.remove('graph-hidden');
+
+    const included = new Set<string>();
+    const rowsBySha = new Map<string, HTMLTableRowElement>();
+    commitTbody.querySelectorAll<HTMLTableRowElement>('tr.data-row').forEach(tr => {
+        const sha = tr.dataset.sha;
+        // Unreachable in practice: renderCommits() unconditionally sets
+        // tr.dataset.sha on every row it builds, and .data-row only ever
+        // matches rows it built. Guard kept for the same reason as above -
+        // dataset.sha not being guaranteed by TypeScript's own types.
+        /* v8 ignore next */
+        if (!sha) return;
+        rowsBySha.set(sha, tr);
+        if (!tr.classList.contains('filtered-out')) {
+            included.add(sha);
+        }
+    });
+
+    // buildCommitGraph()'s first argument doubles as both the set of rows
+    // to actually produce (governed by `included`) and the lookup data its
+    // compression pass walks through to connect around anything excluded.
+    // For the main log those are the same list; for a path-scoped view
+    // (File Log, Folder View) graphEdges supplies the real ancestry `sorted`
+    // itself doesn't have (see onRequestCommits on the extension host).
+    //
+    // A recent scoped commit is quite likely to also fall within
+    // graphEdges' own (recent, unscoped) batch - the two aren't disjoint -
+    // so this dedupes by hash rather than plain-concatenating: iterating
+    // the same hash twice would make compressToIncluded's output (and so
+    // layoutCommitGraph's lane assignment) process it twice too, not just
+    // waste a little work. Which copy wins doesn't matter for correctness
+    // (git's %P for a given hash is the same real data regardless of which
+    // query returned it) - `sorted` is picked arbitrarily, over graphEdges.
+    const sortedHashes = new Set(sorted.map(c => c.hash));
+    const graphInput = sorted.concat(graphEdges.filter(c => !sortedHashes.has(c.hash)));
+    const graphRows = buildCommitGraph(
+        graphInput.map(c => ({ hash: c.hash, parentHashes: c.parentHashes })),
+        included,
+    );
+    const commitsByHash = new Map(sorted.map(c => [c.hash, c]));
+
+    const laneCount = Math.max(
+        1,
+        ...graphRows.map(r => r.lane + 1),
+        ...graphRows.flatMap(r => r.segments.map(s => Math.max(s.fromLane, s.toLane) + 1)),
+    );
+
+    const graphHeader = table.querySelector<HTMLElement>('th.col-graph');
+    if (graphHeader) {
+        graphHeader.style.width = `${laneCount * GRAPH_LANE_WIDTH}px`;
+    }
+
+    // Measured off a real row rather than assumed, so the graph's own pixel
+    // math (see buildGraphCellSvg) always matches actual row height - which
+    // depends on the user's font-size setting, not something to hardcode.
+    // jsdom (the test environment) has no real layout engine and always
+    // reports 0 here, so DEFAULT_ROW_HEIGHT is what every existing test
+    // actually exercises - a real browser only falls back to it if a row's
+    // rect legitimately measures 0 (nothing rendered yet).
+    const measuredHeight = commitTbody.querySelector('tr.data-row')?.getBoundingClientRect().height;
+    const rowHeight = measuredHeight ? measuredHeight : DEFAULT_ROW_HEIGHT;
+
+    for (let i = 0; i < graphRows.length; i++) {
+        const row = graphRows[i];
+        const tr = rowsBySha.get(row.hash);
+        const td = tr?.querySelector<HTMLElement>('td.col-graph');
+        // Unreachable in practice: `row.hash` always came from `sorted`,
+        // the same commit list rowsBySha was just built from, and every
+        // row renderCommits() builds always includes a td.col-graph as its
+        // first cell.
+        /* v8 ignore next */
+        if (!td) continue;
+        const incoming = i > 0 ? graphRows[i - 1].segments : [];
+        const commit = commitsByHash.get(row.hash);
+        // Unreachable in practice: same reasoning as the td guard above -
+        // row.hash always came from `sorted`, the same list commitsByHash
+        // was just built from.
+        /* v8 ignore next */
+        if (!commit) continue;
+        td.replaceChildren(buildGraphCellSvg(row, incoming, laneCount, rowHeight, commit));
+    }
+}
+
+// --- Commit graph dot tooltip (log mode only) ---
+//
+// Everything the *row itself* already shows (hash, subject, author, date)
+// deliberately stays off this tooltip - it would just repeat the adjacent
+// columns. What it shows instead is what no column does: parent hashes
+// (free - already have this client-side, and the only place a merge
+// commit's own parents are ever written out as text rather than just
+// implied by the graph's shape) and which branches/tags actually contain
+// this commit (real reachability, not the rare direct-decoration ref-pill
+// badges already shown inline in the Message column). The refs need a
+// per-commit git query this app doesn't run anywhere else, so unlike
+// everything else drawn eagerly into the graph column, that part is
+// fetched lazily - only for a commit someone actually hovers, after a
+// short delay so a mouse merely passing over several dots doesn't fire a
+// git call for every one of them.
+
+const graphTooltip = document.getElementById('commit-graph-tooltip');
+const GRAPH_TOOLTIP_HOVER_DELAY = 150;
+const commitRefsCache = new Map<string, { branches: string[]; tags: string[] }>();
+const inFlightRefsRequests = new Set<string>();
+let graphTooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
+// Which commit the tooltip is currently showing (or about to show) for,
+// and its parent hashes (known up front, unlike branches/tags - carried
+// alongside so renderGraphTooltipContent doesn't need commitsByHash, which
+// is local to renderCommitGraph()). Lets a commitRefsLoaded response that
+// arrives after the user has already moved on to a different dot (or away
+// entirely) update the cache without clobbering what's actually on screen.
+let currentTooltipSha: string | null = null;
+let currentTooltipParents: string[] = [];
+
+// Same .ref-pill/.ref-branch/.ref-tag classes renderCommits() already uses
+// for the inline badges on a commit's own %D-decoration refs (see its
+// commit.refs handling) - one visual language for "here's a ref name"
+// everywhere it appears, not a second pill style invented just for this.
+function buildRefPills(names: string[], cssClass: string): string {
+    return names.map(name => `<span class="ref-pill ${cssClass}">${escapeHtml(name)}</span>`).join('');
+}
+
+function renderGraphTooltipContent(sha: string): void {
+    if (!graphTooltip) return;
+    const rows: string[] = [];
+    if (currentTooltipParents.length > 0) {
+        const shortParents = currentTooltipParents.map(p => p.slice(0, 7));
+        rows.push(`<div class="tooltip-row"><span class="tooltip-label">${currentTooltipParents.length > 1 ? 'Parents' : 'Parent'}: </span>${escapeHtml(shortParents.join(', '))}</div>`);
+    }
+    const cached = commitRefsCache.get(sha);
+    if (!cached) {
+        rows.push('<div class="tooltip-row">Loading branches/tags…</div>');
+        graphTooltip.innerHTML = rows.join('');
+        return;
+    }
+    if (cached.branches.length > 0) {
+        rows.push(`<div class="tooltip-row"><span class="tooltip-label">Branches: </span>${buildRefPills(cached.branches, 'ref-branch')}</div>`);
+    }
+    if (cached.tags.length > 0) {
+        rows.push(`<div class="tooltip-row"><span class="tooltip-label">Tags: </span>${buildRefPills(cached.tags, 'ref-tag')}</div>`);
+    }
+    // A commit can genuinely be on neither - reachable only from a ref
+    // that's since been deleted, or from the reflog alone - rare, but
+    // silently showing nothing beyond parents would look broken rather
+    // than "nothing more to show".
+    if (cached.branches.length === 0 && cached.tags.length === 0) {
+        rows.push('<div class="tooltip-row">Not on any current branch or tag</div>');
+    }
+    graphTooltip.innerHTML = rows.join('');
+}
+
+function showGraphTooltipFor(sha: string, parentHashes: string[], clientX: number, clientY: number): void {
+    if (!graphTooltip) return;
+    currentTooltipSha = sha;
+    currentTooltipParents = parentHashes;
+    renderGraphTooltipContent(sha);
+    // Offset from the cursor rather than directly under it - purely
+    // cosmetic (pointer-events: none on the tooltip means it can never
+    // actually block the dot underneath from receiving mouseout).
+    graphTooltip.style.left = `${clientX + 12}px`;
+    graphTooltip.style.top = `${clientY + 12}px`;
+    graphTooltip.style.display = 'block';
+    clampMenu(graphTooltip);
+
+    if (!commitRefsCache.has(sha) && !inFlightRefsRequests.has(sha)) {
+        inFlightRefsRequests.add(sha);
+        vscode.postMessage({ type: 'requestCommitRefs', sha });
+    }
+}
+
+function hideGraphTooltip(): void {
+    currentTooltipSha = null;
+    if (graphTooltipShowTimer) {
+        clearTimeout(graphTooltipShowTimer);
+        graphTooltipShowTimer = null;
+    }
+    if (graphTooltip) graphTooltip.style.display = 'none';
+}
+
+if (commitTbody) {
+    commitTbody.addEventListener('mouseover', (e) => {
+        const dot = (e.target as Element).closest?.('circle[data-sha]');
+        if (!dot) return;
+        const sha = dot.getAttribute('data-sha');
+        if (!sha || sha === currentTooltipSha) return;
+        const parentHashes = (dot.getAttribute('data-parents') || '').split(',').filter(Boolean);
+        if (graphTooltipShowTimer) clearTimeout(graphTooltipShowTimer);
+        const { clientX, clientY } = e;
+        graphTooltipShowTimer = setTimeout(() => {
+            graphTooltipShowTimer = null;
+            showGraphTooltipFor(sha, parentHashes, clientX, clientY);
+        }, GRAPH_TOOLTIP_HOVER_DELAY);
+    });
+    commitTbody.addEventListener('mouseout', (e) => {
+        if (!(e.target as Element).closest?.('circle[data-sha]')) return;
+        hideGraphTooltip();
+    });
 }
 
 function selectFirstVisibleCommit(): void {
@@ -1154,9 +1520,22 @@ function applyFilters(autoSelect: boolean = true): void {
             const thead = row.closest('table')?.querySelector('thead tr');
             if (!thead) return;
             let visible = true;
-            const ths = thead.querySelectorAll('th[data-col]');
+            // Every <th> (not just ones with data-col) - `i` has to stay
+            // aligned with `cells`' real DOM position for cells[i] below to
+            // read the right column. The graph column has no data-col (it's
+            // not filterable) but is still a real cell each row has, so
+            // querying th[data-col] here would skip it and shift every
+            // following index left by one - filtering the wrong columns
+            // against each other's values.
+            const ths = thead.querySelectorAll('th');
             ths.forEach((th, i) => {
                 const col = (th as HTMLElement).dataset.col || '';
+                if (!col) {
+                    // No filter applies to this column (graph, or any
+                    // future non-data column) - never hides a row on its
+                    // own.
+                    return;
+                }
                 if (dateColumns.includes(col)) {
                     // In log mode, date filtering is handled server-side via --since/--until.
                     // dateColumns is just ['authorDate'], and that column only ever exists on
@@ -1199,6 +1578,19 @@ function applyFilters(autoSelect: boolean = true): void {
         selectFirstVisibleCommit();
     }
 
+    // renderCommits() calls this itself when there's an active filter to
+    // reapply, so it already re-renders the graph afterward in that path -
+    // but applyFilters() also runs on its own on every filter keystroke
+    // (see initColumnFilters()'s text-input listener), which never goes
+    // through renderCommits() at all. Without this, typing into a filter
+    // would leave the graph showing the previous filtered-out state until
+    // the next full re-render.
+    if (state.mode === 'log') {
+        const sorted = commitSortColumn
+            ? sortArray(allCommits, commitSortColumn, commitSortAsc)
+            : allCommits;
+        renderCommitGraph(sorted);
+    }
 }
 
 initColumnFilters();
@@ -1377,6 +1769,7 @@ window.addEventListener('message', (event) => {
         case 'commitsLoaded': {
             const newCommits: Commit[] = msg.commits;
             allCommits = allCommits.concat(newCommits);
+            if (msg.graphEdges) graphEdges = msg.graphEdges;
             hasMore = msg.hasMore;
             loading = false;
             renderCommits();
@@ -1423,6 +1816,18 @@ window.addEventListener('message', (event) => {
         case 'branchesLoaded': {
             branchList = msg.branches;
             renderBranchesSubmenu();
+            break;
+        }
+        case 'commitRefsLoaded': {
+            inFlightRefsRequests.delete(msg.sha);
+            commitRefsCache.set(msg.sha, { branches: msg.branches, tags: msg.tags });
+            // Only touch the visible tooltip if it's still showing (or
+            // still pending) for this exact commit - the user may have
+            // moved to a different dot, or away entirely, by the time this
+            // round trip comes back.
+            if (currentTooltipSha === msg.sha) {
+                renderGraphTooltipContent(msg.sha);
+            }
             break;
         }
         case 'error': {

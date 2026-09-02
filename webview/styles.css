@@ -202,10 +202,24 @@ tr.data-row.selected {
 }
 
 /* Commit list columns */
+#commit-table .col-graph { width: 14px; padding: 0; }
 #commit-table .col-sha { width: 80px; }
 #commit-table .col-message { width: auto; }
 #commit-table .col-author { width: 150px; }
 #commit-table .col-date { width: 180px; }
+
+/* Commit graph column - hidden whenever the list isn't in git's own log
+   order (see renderCommitGraph() in main.ts for why a non-default sort
+   makes the graph meaningless rather than just differently laid out). */
+#commit-table.graph-hidden .col-graph {
+    display: none;
+}
+
+.commit-graph-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
 
 /* Files table columns */
 #files-table .col-path { width: auto; }
@@ -265,6 +279,50 @@ td.col-deletions { text-align: right; color: var(--vscode-gitDecoration-deletedR
     z-index: 100;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     min-width: 160px;
+}
+
+/* VS Code's own dedicated hover-widget tokens (the same ones its native
+   editor hover popup uses), not the plain menu tokens - reads as a real
+   hover widget rather than blending into the general menu chrome, and a
+   noticeably stronger shadow than .context-menu's for the same reason:
+   this needs to read as clearly "on top" the instant it appears. */
+#commit-graph-tooltip {
+    position: fixed;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-menu-background));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-menu-foreground));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
+    border-radius: 4px;
+    padding: 8px 12px;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    font-size: 1em;
+    max-width: 380px;
+    pointer-events: none;
+}
+
+#commit-graph-tooltip .tooltip-row {
+    /* Wrap, don't truncate - an ellipsis on a branch/tag list silently
+       hides real names rather than just wrapping to a second line. */
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+#commit-graph-tooltip .tooltip-row + .tooltip-row {
+    margin-top: 2px;
+}
+
+/* .ref-pill itself has no vertical margin (fine in its other use - the
+   Message column's single-line, non-wrapping ref badges) - scoped here
+   rather than added to .ref-pill globally, since a branches/tags row with
+   several pills genuinely does wrap onto multiple lines and needs a gap
+   between them. */
+#commit-graph-tooltip .ref-pill {
+    margin-bottom: 3px;
+}
+
+#commit-graph-tooltip .tooltip-label {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 600;
 }
 
 .context-menu-item {

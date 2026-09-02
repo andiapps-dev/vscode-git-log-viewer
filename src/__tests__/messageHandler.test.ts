@@ -105,6 +105,41 @@ describe('requestCommits', () => {
         const shas = msg.commits.map((c: { hash: string }) => c.hash);
         expect(shas).toContain(repo.commits['unmerged-preview']);
     });
+
+    it('does not include graphEdges for the main (unscoped) log', async () => {
+        const { handler, sender } = createHandler();
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 10 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.graphEdges).toBeUndefined();
+    });
+
+    it('includes graphEdges - real unscoped ancestry data - on a path-scoped view\'s first page', async () => {
+        const { handler, sender } = createHandler({
+            targetPath: repo.repoRoot + '/src/experimental/revert-target.ts',
+            isFile: true,
+        });
+        await handler.handle({ type: 'requestCommits', offset: 0, count: 10 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.graphEdges).toBeDefined();
+        expect(msg.graphEdges.length).toBeGreaterThan(0);
+        // Unscoped - a real commit that never touched revert-target.ts
+        // should still appear, which msg.commits itself never would.
+        const edgeShas = msg.graphEdges.map((c: { hash: string }) => c.hash);
+        expect(edgeShas).toContain(repo.commits['foundation-0']);
+    });
+
+    it('does not re-fetch graphEdges on a path-scoped view\'s later pages', async () => {
+        const { handler, sender } = createHandler({
+            targetPath: repo.repoRoot + '/src/experimental/revert-target.ts',
+            isFile: true,
+        });
+        await handler.handle({ type: 'requestCommits', offset: 1, count: 10 });
+
+        const msg = (sender.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(msg.graphEdges).toBeUndefined();
+    });
 });
 
 describe('requestBranches', () => {
@@ -119,6 +154,22 @@ describe('requestBranches', () => {
         for (const b of repo.branches) {
             expect(msg.branches).toContain(b);
         }
+    });
+});
+
+describe('requestCommitRefs', () => {
+    it('posts commitRefsLoaded with the sha and its actual containing branches/tags', async () => {
+        const { handler, sender } = createHandler();
+        const sha = repo.commits['tag-v1.0'];
+        await handler.handle({ type: 'requestCommitRefs', sha });
+
+        const post = (sender.postMessage as ReturnType<typeof vi.fn>);
+        expect(post).toHaveBeenCalledTimes(1);
+        const msg = post.mock.calls[0][0];
+        expect(msg.type).toBe('commitRefsLoaded');
+        expect(msg.sha).toBe(sha);
+        expect(msg.branches).toContain('main');
+        expect(msg.tags).toContain('v1.0');
     });
 });
 

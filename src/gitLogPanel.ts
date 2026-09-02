@@ -297,6 +297,7 @@ export class GitLogPanel {
         <div id="commit-list-panel" class="panel">
             <table id="commit-table">
                 <thead><tr>
+                    <th class="col-graph"></th>
                     <th class="col-sha" data-col="shortHash">SHA-1<span class="sort-arrow"></span></th>
                     <th class="col-message" data-col="subject">Message<span class="sort-arrow"></span></th>
                     <th class="col-author" data-col="authorName">Author<span class="sort-arrow"></span></th>
@@ -345,6 +346,7 @@ export class GitLogPanel {
         <div class="context-menu-item" id="ctx-commit-refresh">Refresh</div>
     </div>
     <div id="branches-submenu" class="context-menu" style="display:none;"></div>
+    <div id="commit-graph-tooltip" style="display:none;"></div>
     <script nonce="${nonce}">var initialState = ${safeJsonStringify(this.initialState)};</script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

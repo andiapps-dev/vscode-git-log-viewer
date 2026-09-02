@@ -13,6 +13,21 @@ Right-click a file or folder in the VS Code Explorer, or right-click inside an o
 - **Commit details** — full SHA, author, date, and commit message body
 - **Changed files** — files modified in the selected commit with status, lines added/removed
 
+### Commit Graph
+The leftmost column of the commit list draws the branch/merge topology as a graph — one
+lane per line of development, colored consistently down its length, connected by smooth
+curves at every branch and merge point. Hover a commit's dot to see which branches and
+tags it's actually reachable from — real containment, not just refs pointing directly at
+it.
+
+- Works in the main log, File Log, and Folder View alike — a path-scoped view's graph
+  correctly connects around commits that didn't touch that path, using real git ancestry
+  data rather than just what the visible list itself returns
+- Stays correct while filtering — a filtered-out commit's line reconnects straight to its
+  nearest still-visible ancestor instead of leaving a dangling end
+- Hidden automatically whenever the list isn't in git's own log order (a column sort is
+  active, or in Line History mode) — a graph only makes sense in real commit order
+
 ### Branches
 Right-click the commit list and select **Branches** to scope the log to one or more
 specific branches (multi-select) instead of just the checked-out branch, or choose

@@ -5,6 +5,10 @@ export interface Commit {
     authorName: string;
     authorDate: string;
     refs: string;
+    // Full parent hashes (git %P), space-separated in raw git output - empty
+    // for a root commit, 2+ entries for a merge. Feeds the commit-graph lane
+    // layout in webview/graph.ts; unrelated to the flat log-list rendering.
+    parentHashes: string[];
 }
 
 export interface CommitDetail {
@@ -63,6 +67,11 @@ export interface RequestCommitsMessage {
 
 export interface RequestBranchesMessage {
     type: 'requestBranches';
+}
+
+export interface RequestCommitRefsMessage {
+    type: 'requestCommitRefs';
+    sha: string;
 }
 
 export interface RequestCommitDetailsMessage {
@@ -129,11 +138,25 @@ export interface CommitsLoadedMessage {
     type: 'commitsLoaded';
     commits: Commit[];
     hasMore: boolean;
+    // Only present for a path-scoped request's first page (File Log,
+    // Folder View) - real, unscoped parent-hash data the commit graph
+    // needs to connect around commits `commits` itself never returns (git
+    // log -- path never includes commits that didn't touch that path,
+    // even though they're real intermediate parents of ones that did).
+    // Absent entirely for the main (unscoped) log, which never needs it.
+    graphEdges?: Commit[];
 }
 
 export interface BranchesLoadedMessage {
     type: 'branchesLoaded';
     branches: string[];
+}
+
+export interface CommitRefsLoadedMessage {
+    type: 'commitRefsLoaded';
+    sha: string;
+    branches: string[];
+    tags: string[];
 }
 
 export interface CommitDetailsLoadedMessage {

@@ -2,6 +2,7 @@ import * as path from 'path';
 import { GitService } from './gitService';
 import {
     InitialState,
+    Commit,
     CommitDetail,
     RequestCommitsMessage,
     RequestCommitDetailsMessage,
@@ -27,6 +28,12 @@ export interface PanelCreator {
 }
 
 export class MessageHandler {
+    // How many unscoped commits to fetch for the commit-graph's supporting
+    // ancestry data (see onRequestCommits) - generous enough to connect
+    // most real path-scoped gaps, bounded so it doesn't walk an entire
+    // large repo's history unbounded for a rarely-touched file.
+    private static readonly GRAPH_EDGES_FETCH_COUNT = 3000;
+
     constructor(
         private gitService: GitService,
         private sender: MessageSender,
@@ -73,6 +80,9 @@ export class MessageHandler {
                 case 'requestBranches':
                     await this.onRequestBranches();
                     break;
+                case 'requestCommitRefs':
+                    await this.onRequestCommitRefs(msg as { sha: string });
+                    break;
                 case 'viewFileContents':
                     await this.onViewFileContents(msg as { sha: string; filePath: string });
                     break;
@@ -102,6 +112,7 @@ export class MessageHandler {
             return;
         }
 
+        const targetIsScoped = !!relativePath && relativePath !== '.';
         const commits = await this.gitService.getLog(
             this.repoRoot,
             relativePath || '.',
@@ -112,10 +123,37 @@ export class MessageHandler {
             this.initialState.isFile,
             msg.branches,
         );
+
+        // A path-scoped query (File Log, Folder View) never returns commits
+        // that didn't touch that path - even though they can be real
+        // intermediate parents of ones that did (git's history
+        // simplification only affects which commits get *returned*, never
+        // what a returned commit's own %P is). The commit graph needs that
+        // missing ancestry to connect around them, so fetch it separately,
+        // unscoped, from the same branches/date range. Bounded rather than
+        // walking the whole repo, and only on the first page - later pages
+        // degrade gracefully (an unresolved gap just shows as a dangling
+        // line, not an error) rather than growing this fetch without bound
+        // as more of a very deep, rarely-touched file's history loads.
+        let graphEdges: Commit[] | undefined;
+        if (targetIsScoped && msg.offset === 0) {
+            graphEdges = await this.gitService.getLog(
+                this.repoRoot,
+                '.',
+                0,
+                MessageHandler.GRAPH_EDGES_FETCH_COUNT,
+                msg.after,
+                msg.before,
+                false,
+                msg.branches,
+            );
+        }
+
         this.sender.postMessage({
             type: 'commitsLoaded',
             commits,
             hasMore: commits.length === msg.count,
+            ...(graphEdges ? { graphEdges } : {}),
         });
     }
 
@@ -214,6 +252,11 @@ export class MessageHandler {
     private async onRequestBranches(): Promise<void> {
         const branches = await this.gitService.listBranches(this.repoRoot);
         this.sender.postMessage({ type: 'branchesLoaded', branches });
+    }
+
+    private async onRequestCommitRefs(msg: { sha: string }): Promise<void> {
+        const { branches, tags } = await this.gitService.getContainingRefs(this.repoRoot, msg.sha);
+        this.sender.postMessage({ type: 'commitRefsLoaded', sha: msg.sha, branches, tags });
     }
 
     private async onViewFileContents(msg: { sha: string; filePath: string }): Promise<void> {

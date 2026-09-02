@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { loadWebview, sendFromExtension, triggerLoadMoreIntersection } from './harness';
 
 function commit(overrides: Partial<Record<string, unknown>> = {}) {
@@ -10,6 +10,7 @@ function commit(overrides: Partial<Record<string, unknown>> = {}) {
         authorName: 'Alice',
         authorDate: '2024-01-01T00:00:00-05:00',
         refs: '',
+        parentHashes: [],
         ...overrides,
     };
 }
@@ -282,6 +283,349 @@ describe('log mode: filtering', () => {
             offset: 0,
             after: '2024-01-01T00:00:00',
         }));
+    });
+});
+
+describe('log mode: commit graph', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('draws a connecting line between a commit and its parent, and sizes the column to the lane count', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [
+                commit({ hash: 'h1', parentHashes: ['h2'] }),
+                commit({ hash: 'h2', parentHashes: [] }),
+            ],
+            hasMore: false,
+        });
+
+        expect(document.getElementById('commit-table')?.classList.contains('graph-hidden')).toBe(false);
+
+        const graphHeader = document.querySelector<HTMLElement>('#commit-table th.col-graph')!;
+        expect(graphHeader.style.width).toBe('14px'); // one lane wide
+
+        const row1Svg = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg')!;
+        const row2Svg = document.querySelector('#commit-tbody tr[data-sha="h2"] td.col-graph svg')!;
+        // h1 (first row, nothing above it) draws only its own lower-half
+        // curve down toward h2; h2 draws only the upper-half curve coming
+        // in from h1 (it's a root itself, no lower half of its own).
+        expect(row1Svg.querySelectorAll('path')).toHaveLength(1);
+        expect(row2Svg.querySelectorAll('path')).toHaveLength(1);
+        // Every row gets its own node dot regardless of segments.
+        expect(row1Svg.querySelectorAll('circle')).toHaveLength(1);
+        expect(row2Svg.querySelectorAll('circle')).toHaveLength(1);
+    });
+
+    describe('node dot hover tooltip', () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('waits out the hover delay before requesting refs, then shows them once loaded', async () => {
+            const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 50, clientY: 60 }));
+
+            const tooltip = document.getElementById('commit-graph-tooltip')!;
+            // Still hidden and no request sent yet - the hover delay hasn't
+            // elapsed, so a mouse merely passing over the dot never fires a
+            // git call at all.
+            expect(tooltip.style.display).toBe('none');
+            expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'requestCommitRefs' }));
+
+            vi.advanceTimersByTime(150);
+            expect(tooltip.style.display).toBe('block');
+            expect(tooltip.textContent).toContain('Loading');
+            expect(api.postMessage).toHaveBeenCalledWith({ type: 'requestCommitRefs', sha: 'h1' });
+            expect(tooltip.style.left).toBe('62px'); // clientX + 12
+            expect(tooltip.style.top).toBe('72px'); // clientY + 12
+
+            sendFromExtension({ type: 'commitRefsLoaded', sha: 'h1', branches: ['main', 'feature/x'], tags: ['v1.2.0'] });
+            // Real ref-pill badges (same classes as the Message column's
+            // own ref decorations), not a plain comma-joined string.
+            const branchPills = tooltip.querySelectorAll('.ref-pill.ref-branch');
+            expect(Array.from(branchPills).map(p => p.textContent)).toEqual(['main', 'feature/x']);
+            const tagPills = tooltip.querySelectorAll('.ref-pill.ref-tag');
+            expect(Array.from(tagPills).map(p => p.textContent)).toEqual(['v1.2.0']);
+        });
+
+        it('shows parent hashes immediately, before the branches/tags request even resolves', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({
+                type: 'commitsLoaded',
+                commits: [commit({ hash: 'h1', parentHashes: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] })],
+                hasMore: false,
+            });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+
+            const tooltip = document.getElementById('commit-graph-tooltip')!;
+            // Already available client-side (no round trip needed) - shows
+            // up front, alongside "Loading…" for the part that does need one.
+            expect(tooltip.textContent).toContain('Parent:');
+            expect(tooltip.textContent).toContain('aaaaaaa'); // 7-char short form
+            expect(tooltip.textContent).not.toContain('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+            expect(tooltip.textContent).toContain('Loading');
+        });
+
+        it('labels a merge commit\'s multiple parents as plural', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({
+                type: 'commitsLoaded',
+                commits: [commit({ hash: 'merge', parentHashes: ['p1111111111111111111111111111111111111', 'p2222222222222222222222222222222222222'] })],
+                hasMore: false,
+            });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="merge"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+
+            const tooltip = document.getElementById('commit-graph-tooltip')!;
+            expect(tooltip.textContent).toContain('Parents:');
+            expect(tooltip.textContent).toContain('p111111, p222222');
+        });
+
+        it('omits the parent row entirely for a root commit', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({
+                type: 'commitsLoaded',
+                commits: [commit({ hash: 'root', parentHashes: [] })],
+                hasMore: false,
+            });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="root"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+
+            expect(document.getElementById('commit-graph-tooltip')?.textContent).not.toContain('Parent');
+        });
+
+        it('cancels the pending request if the mouse leaves before the hover delay elapses', async () => {
+            const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            dot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+
+            expect(document.getElementById('commit-graph-tooltip')?.style.display).toBe('none');
+            expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'requestCommitRefs' }));
+        });
+
+        it('hides the tooltip on mouseout after it has been shown', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+            expect(document.getElementById('commit-graph-tooltip')?.style.display).toBe('block');
+
+            dot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+            expect(document.getElementById('commit-graph-tooltip')?.style.display).toBe('none');
+        });
+
+        it('shows "not on any branch or tag" when a commit is reachable from neither', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+            sendFromExtension({ type: 'commitRefsLoaded', sha: 'h1', branches: [], tags: [] });
+
+            expect(document.getElementById('commit-graph-tooltip')?.textContent).toContain('Not on any current branch or tag');
+        });
+
+        it('reuses a cached result on a second hover instead of requesting it again', async () => {
+            const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+            const dot = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+            sendFromExtension({ type: 'commitRefsLoaded', sha: 'h1', branches: ['main'], tags: [] });
+            dot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+            api.postMessage.mockClear();
+
+            dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+            // Shows immediately from cache, not a "Loading…" placeholder,
+            // and never re-requests data it already has.
+            expect(document.getElementById('commit-graph-tooltip')?.textContent).toContain('main');
+            expect(api.postMessage).not.toHaveBeenCalled();
+        });
+
+        it('ignores a commitRefsLoaded response for a commit that is no longer the one hovered', async () => {
+            await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+            sendFromExtension({
+                type: 'commitsLoaded',
+                commits: [commit({ hash: 'h1' }), commit({ hash: 'h2' })],
+                hasMore: false,
+            });
+            const dot1 = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg circle')!;
+            const dot2 = document.querySelector('#commit-tbody tr[data-sha="h2"] td.col-graph svg circle')!;
+
+            dot1.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+            dot1.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+            dot2.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            vi.advanceTimersByTime(150);
+
+            // h1's request resolves after focus has already moved to h2 -
+            // must not clobber what's now on screen.
+            sendFromExtension({ type: 'commitRefsLoaded', sha: 'h1', branches: ['stale'], tags: [] });
+            expect(document.getElementById('commit-graph-tooltip')?.textContent).not.toContain('stale');
+        });
+    });
+
+    it('opens a second lane and draws two lines for a merge commit', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [
+                commit({ hash: 'merge', parentHashes: ['p1', 'p2'] }),
+                commit({ hash: 'p1', parentHashes: [] }),
+                commit({ hash: 'p2', parentHashes: [] }),
+            ],
+            hasMore: false,
+        });
+
+        const mergeSvg = document.querySelector('#commit-tbody tr[data-sha="merge"] td.col-graph svg')!;
+        // First parent keeps the merge's own lane, the second opens a new
+        // one - two distinct lower-half curves out of the merge row.
+        expect(mergeSvg.querySelectorAll('path')).toHaveLength(2);
+
+        // Two lanes now active -> the graph column is sized for both.
+        const graphHeader = document.querySelector<HTMLElement>('#commit-table th.col-graph')!;
+        expect(graphHeader.style.width).toBe('28px');
+    });
+
+    it('draws exactly one dot per row - the row\'s own commit, never a passthrough lane', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [
+                // merge opens two lanes (p1 keeps lane 0, p2 opens lane 1).
+                commit({ hash: 'merge', parentHashes: ['p1', 'p2'] }),
+                // Neither lane resolves until p1/p2 below - unrelated sits
+                // between them, on its own third lane, while both are still
+                // passing through it on plain lines.
+                commit({ hash: 'unrelated', parentHashes: [] }),
+                commit({ hash: 'p1', parentHashes: [] }),
+                commit({ hash: 'p2', parentHashes: [] }),
+            ],
+            hasMore: false,
+        });
+
+        // A dot means "a commit happened here" - p1's and p2's lanes are
+        // just passing through this row, not resolving on it, so they stay
+        // plain lines with no dot of their own; only unrelated's real node
+        // gets one.
+        const unrelatedSvg = document.querySelector('#commit-tbody tr[data-sha="unrelated"] td.col-graph svg')!;
+        expect(unrelatedSvg.querySelectorAll('circle')).toHaveLength(1);
+    });
+
+    it('hides the graph column entirely when a column sort is active', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [commit({ hash: 'h1', authorName: 'Bob' }), commit({ hash: 'h2', authorName: 'Alice' })],
+            hasMore: false,
+        });
+        expect(document.getElementById('commit-table')?.classList.contains('graph-hidden')).toBe(false);
+
+        const authorTh = document.querySelector('#commit-table th[data-col="authorName"]')!;
+        click(authorTh);
+
+        expect(document.getElementById('commit-table')?.classList.contains('graph-hidden')).toBe(true);
+    });
+
+    it('reconnects around a filtered-out commit instead of leaving a dangling line', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        // h1 -> h2 -> h3, h2 will be filtered out - the graph should still
+        // connect h1 straight down to h3 rather than dangling on h2.
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [
+                commit({ hash: 'h1', subject: 'keep-me', parentHashes: ['h2'] }),
+                commit({ hash: 'h2', subject: 'filter-me-out', parentHashes: ['h3'] }),
+                commit({ hash: 'h3', subject: 'keep-me too', parentHashes: [] }),
+            ],
+            hasMore: false,
+        });
+
+        const filterInput = document.querySelector<HTMLInputElement>('#commit-table input[data-col="subject"]')!;
+        filterInput.value = 'keep-me';
+        filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const row2 = document.querySelector('#commit-tbody tr[data-sha="h2"]')!;
+        expect(row2.classList.contains('filtered-out')).toBe(true);
+
+        // Both still-visible rows stay on lane 0 (a single straight-down
+        // curve running through where h2 used to connect - x never moves
+        // off 0.5), not two dangling ends.
+        const row1Svg = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg')!;
+        const row3Svg = document.querySelector('#commit-tbody tr[data-sha="h3"] td.col-graph svg')!;
+        const row1Path = row1Svg.querySelector('path')!;
+        const row3Path = row3Svg.querySelector('path')!;
+        // jsdom has no real layout engine (every rect measures 0), so
+        // renderCommitGraph() falls back to DEFAULT_ROW_HEIGHT (22) - lane
+        // 0's center is x=7 (half of the 14px GRAPH_LANE_WIDTH), row
+        // center y=11 (half of 22).
+        expect(row1Path.getAttribute('d')).toBe('M 7 11 C 7 16.5 7 16.5 7 22');
+        expect(row3Path.getAttribute('d')).toBe('M 7 0 C 7 5.5 7 5.5 7 11');
+
+        // The graph column stays a single lane wide - h2 being excluded
+        // never opened a second one.
+        const graphHeader = document.querySelector<HTMLElement>('#commit-table th.col-graph')!;
+        expect(graphHeader.style.width).toBe('14px');
+    });
+
+    it('uses graphEdges to connect commits a path-scoped view never returned itself', async () => {
+        await loadWebview({ mode: 'log', targetPath: '/repo/some-file.ts', isFile: true });
+        // h1 and h3 are the only two commits that touched some-file.ts (what
+        // a scoped File Log query actually returns as `commits`), but h1's
+        // real parent is h2 - which never touched the file, so it's not in
+        // `commits` at all. graphEdges (the unscoped supporting data) is the
+        // only place h2's own real parent link (-> h3) exists; without it,
+        // h1 would have nothing to connect to and stay dangling.
+        sendFromExtension({
+            type: 'commitsLoaded',
+            commits: [
+                commit({ hash: 'h1', parentHashes: ['h2'] }),
+                commit({ hash: 'h3', parentHashes: [] }),
+            ],
+            graphEdges: [
+                // Deliberately also includes h1 itself, duplicating what
+                // `commits` already has - graphEdges' own recent unscoped
+                // batch legitimately can overlap with the scoped commits,
+                // and the merge is expected to dedupe rather than process
+                // h1 twice.
+                commit({ hash: 'h1', parentHashes: ['h2'] }),
+                commit({ hash: 'h2', parentHashes: ['h3'] }),
+            ],
+            hasMore: false,
+        });
+
+        const row1Svg = document.querySelector('#commit-tbody tr[data-sha="h1"] td.col-graph svg')!;
+        const row3Svg = document.querySelector('#commit-tbody tr[data-sha="h3"] td.col-graph svg')!;
+        // Same lane-0-straight-through shape as the client-side-filter
+        // case above - h1 connects to h3, not left dangling on h2.
+        expect(row1Svg.querySelector('path')!.getAttribute('d')).toBe('M 7 11 C 7 16.5 7 16.5 7 22');
+        expect(row3Svg.querySelector('path')!.getAttribute('d')).toBe('M 7 0 C 7 5.5 7 5.5 7 11');
     });
 });
 
@@ -1100,12 +1444,15 @@ describe('log mode: branches submenu', () => {
         expect(mainItem().textContent).toBe('✓ main');
     });
 
-    it('is hidden in line-history mode', async () => {
+    it('is hidden in line-history mode, and so is the commit graph column', async () => {
         await loadWebview({ mode: 'log', targetPath: '/repo/file.ts', isFile: true, lineStart: 5, lineEnd: 10 });
         sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
 
         rightClick(document.getElementById('commit-list-panel')!);
         expect(document.getElementById('ctx-branches')?.style.display).toBe('none');
+        // -L history is a line's own provenance, not commit topology - not
+        // something git's -L mode is designed to be graphed against.
+        expect(document.getElementById('commit-table')?.classList.contains('graph-hidden')).toBe(true);
     });
 
     it('clicking "Branches" again while the submenu is already open closes it', async () => {

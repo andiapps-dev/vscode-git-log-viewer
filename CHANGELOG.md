@@ -5,7 +5,25 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
-## [Unreleased]
+## [0.5.0] - 2026-09-02
+
+### Added
+
+- **Commit Graph** — the commit list's leftmost column now draws branch/merge topology
+  as a graph: one lane per line of development, colored consistently down its length,
+  connected by smooth curves at every branch and merge point, with a hover tooltip on
+  each commit's dot showing which branches/tags it's actually reachable from. Works in
+  the main log, File Log, and Folder View alike, stays correctly connected while
+  filtering, and is hidden automatically whenever the list isn't in git's own log order
+  (a column sort is active, or in Line History mode).
+
+### Fixed
+
+- Fixed `git log --follow` (used for any single-file "Show File Log" view) silently
+  returning duplicate commits once pagination reached a second page — `--follow`'s
+  internal rename-tracking doesn't compose correctly with `--skip`, a known git
+  limitation. A scoped file's whole history is now fetched in one shot and paginated
+  in-process instead of relying on git's own `--skip` for that case.
 
 ## [0.4.10] - 2026-08-30
 

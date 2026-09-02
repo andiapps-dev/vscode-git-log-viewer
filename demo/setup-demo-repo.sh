@@ -2,8 +2,12 @@
 # Deterministically (re)creates the demo repo record-demo.sh runs against
 # (default ~/Downloads/demo-express) from scratch - a full clone of
 # expressjs/express pinned to one specific commit, plus one local-only
-# fixture branch/commit for the Branches-filter segment to demonstrate
-# filtering the log to something other than the checked-out branch.
+# fixture branch for the Branches-filter segment to demonstrate filtering
+# the log to something other than the checked-out branch. That branch's
+# own tip is a real merge commit (two parallel commits merged together),
+# entirely contained within it - master's own history is never touched -
+# so the commit graph has an actual branch/merge shape to show once
+# combined into "All" view, not just a straight line.
 #
 # Why this needs to exist at all: record-demo.sh's row_y() helper and a
 # long list of hardcoded SHA comments throughout it are calibrated against
@@ -78,6 +82,47 @@ sed -i 's/^    "api"$/    "api",\n    "rate-limiting-friendly"/' package.json
 git add docs/rate-limiting.md package.json
 git -c user.name="david" -c user.email="david@narine.org" \
     commit --quiet -m "docs: add guidance on rate limiting middleware"
+
+echo "=== Creating a second, parallel branch to merge into it - a real merge for the commit graph to show, not just a straight line ==="
+# Branches off the SAME point as feature/rate-limit-docs (master, not on
+# top of its docs commit) - a genuinely independent line of work, not a
+# follow-up commit. Touches package.json too, same as the docs commit
+# above, but on a different line ("restful", not "api") - git auto-merges
+# the two cleanly (nothing to actually conflict on), but critically, the
+# merge's own package.json content then differs from EITHER parent alone
+# (it has both insertions). That's what makes the merge commit itself
+# "interesting" enough to survive git's history simplification and still
+# show up as its own row in the demo's package.json-scoped log - if both
+# branches only touched their own separate new file, the merge would be
+# TREESAME to either parent on package.json specifically and get
+# simplified away, leaving nothing for this demo to actually show.
+git checkout --quiet master
+git checkout --quiet -b feature/rate-limit-docs-faq
+mkdir -p docs
+cat > docs/rate-limiting-faq.md <<'EOF'
+# Rate Limiting FAQ
+
+**Does Express rate-limit by default?**
+No - see docs/rate-limiting.md for how to add it yourself.
+
+**Can I rate-limit only specific routes?**
+Yes - apply the middleware to a specific router or route instead of the
+whole app.
+EOF
+sed -i 's/^    "restful",$/    "restful",\n    "faq-friendly",/' package.json
+git add docs/rate-limiting-faq.md package.json
+git -c user.name="david" -c user.email="david@narine.org" \
+    commit --quiet -m "docs: add rate limiting FAQ"
+
+echo "=== Merging it into feature/rate-limit-docs - the actual merge commit ==="
+git checkout --quiet feature/rate-limit-docs
+git -c user.name="david" -c user.email="david@narine.org" \
+    merge --quiet --no-ff -m "Merge branch 'feature/rate-limit-docs-faq' into feature/rate-limit-docs" feature/rate-limit-docs-faq
+# The branch ref itself isn't needed anymore - its commit is still fully
+# reachable (and shown) via the merge above. Deleting it keeps the
+# Branches submenu's list exactly what the existing segments expect
+# (master + feature/rate-limit-docs, nothing else).
+git branch -D feature/rate-limit-docs-faq
 git checkout --quiet master
 
 echo "=== Removing the 'origin' remote ==="

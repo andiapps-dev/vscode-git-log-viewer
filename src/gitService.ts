@@ -69,6 +69,11 @@ export function parseLogOutput(out: string): Commit[] {
             authorName: parts[3],
             authorDate: parts[4],
             refs: parts[5] || '',
+            // %P is space-separated, empty string for a root commit (no
+            // parents) - split() on an empty string yields [''], not [], so
+            // filter that out rather than ending up with a single bogus
+            // "parent hash" of ''.
+            parentHashes: (parts[6] || '').split(' ').filter(Boolean),
         };
     });
 }
@@ -154,20 +159,36 @@ export class GitService {
     }
 
     async getLog(repoRoot: string, targetPath: string, skip: number, count: number, after?: string, before?: string, followRenames = false, branches?: 'all' | string[]): Promise<Commit[]> {
-        const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D`;
-        const args = ['log', '--decorate=short', `--format=${format}`, `--skip=${skip}`, `-${count}`];
+        const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D${RECORD_SEP}%P`;
+        // --follow only tracks renames for a single file; git errors/ignores it for directories.
+        const useFollow = followRenames && targetPath !== '.';
+        const args = ['log', '--decorate=short', `--format=${format}`];
+        // git log --follow --skip=N is unreliable - --follow's internal
+        // rename-tracking doesn't compose correctly with --skip, and
+        // consecutive pages silently overlap (confirmed directly against a
+        // real repo: requesting --skip=100 after --skip=0 for the same
+        // --follow query returned 84 commits already seen on the first
+        // page). Ask git for the file's whole --follow history in one shot
+        // instead and paginate the result ourselves - a single file's
+        // history is small enough that this is fast regardless of which
+        // page is being requested (a real 1279-commit file's full --follow
+        // log took ~100ms in testing), unlike the main/unscoped log this
+        // would be far too expensive for.
+        if (!useFollow) {
+            args.push(`--skip=${skip}`, `-${count}`);
+        }
         if (branches === 'all') {
             args.push('--all');
         } else if (Array.isArray(branches) && branches.length > 0) {
             args.push(...branches);
         }
-        // --follow only tracks renames for a single file; git errors/ignores it for directories.
-        if (followRenames && targetPath !== '.') args.push('--follow');
+        if (useFollow) args.push('--follow');
         if (after) args.push(`--since=${after}`);
         if (before) args.push(`--until=${before}`);
         args.push('--', targetPath);
         const out = await exec(args, repoRoot);
-        return parseLogOutput(out);
+        const commits = parseLogOutput(out);
+        return useFollow ? commits.slice(skip, skip + count) : commits;
     }
 
     async listBranches(repoRoot: string): Promise<string[]> {
@@ -184,8 +205,30 @@ export class GitService {
             .map(line => line.split('|')[0]);
     }
 
+    // Which branches/tags this specific commit is actually reachable from -
+    // not the same thing as the commit's own refs (%D, used for the ref-
+    // pill badges) which only fires for the rare commit a ref points
+    // directly AT. Two separate for-each-ref calls rather than one covering
+    // all three namespaces at once, so branches vs tags don't need to be
+    // told apart by inspecting a full refname prefix afterward. Called
+    // lazily per commit (on hover), never upfront for a whole page - a
+    // --contains reachability check runs per ref, which isn't free.
+    async getContainingRefs(repoRoot: string, sha: string): Promise<{ branches: string[]; tags: string[] }> {
+        const [branchOut, tagOut] = await Promise.all([
+            exec(['for-each-ref', '--contains', sha, '--format=%(refname:short)|%(symref)', 'refs/heads', 'refs/remotes'], repoRoot),
+            exec(['for-each-ref', '--contains', sha, '--format=%(refname:short)', 'refs/tags'], repoRoot),
+        ]);
+        const branches = branchOut.trim().split('\n')
+            .filter(Boolean)
+            // Same symref exclusion as listBranches() - see its comment.
+            .filter(line => !line.split('|')[1])
+            .map(line => line.split('|')[0]);
+        const tags = tagOut.trim().split('\n').filter(Boolean);
+        return { branches, tags };
+    }
+
     async getLineHistory(repoRoot: string, filePath: string, lineStart: number, lineEnd: number, after?: string, before?: string): Promise<Commit[]> {
-        const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D`;
+        const format = `%H${RECORD_SEP}%h${RECORD_SEP}%s${RECORD_SEP}%an${RECORD_SEP}%aI${RECORD_SEP}%D${RECORD_SEP}%P`;
         const args = ['log', '--decorate=short', `--format=${format}`, '--no-patch', `-L${lineStart},${lineEnd}:${filePath}`];
         if (after) args.push(`--since=${after}`);
         if (before) args.push(`--until=${before}`);

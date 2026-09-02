@@ -14,6 +14,7 @@ export default defineConfig({
                 'src/utils.ts',
                 'webview/utils.ts',
                 'webview/main.ts',
+                'webview/graph.ts',
             ],
             exclude: ['src/__tests__/**', 'webview/__tests__/**'],
             thresholds: {
