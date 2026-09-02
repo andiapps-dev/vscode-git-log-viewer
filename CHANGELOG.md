@@ -5,6 +5,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
+## [0.5.1] - 2026-09-02
+
+### Changed
+
+- Updated `typescript` to 7.0.2 (the new Go-ported compiler). Required adding an explicit
+  `"types": ["node"]` to `tsconfig.json` — the new compiler no longer auto-discovers
+  `@types/node`'s ambient globals (`path`, `fs`, `Buffer`, `process`, etc.) without it.
+  Dev-tooling only; the built extension is unaffected (esbuild does its own
+  transpilation and never invokes `tsc`).
+
 ## [0.5.0] - 2026-09-02
 
 ### Added
