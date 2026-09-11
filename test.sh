@@ -11,7 +11,7 @@ if [ "$1" = "--coverage" ]; then
 fi
 
 echo "Running tests in Docker..."
-sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -c \
+sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:22-slim sh -c \
     "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1 && npm install 2>&1 && npx vitest run $COVERAGE_FLAG 2>&1"
 
 sudo chown -R "$(id -u):$(id -g)" "$SCRIPT_DIR"

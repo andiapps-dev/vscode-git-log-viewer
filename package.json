@@ -10,7 +10,7 @@
     "url": "https://github.com/andiapps-dev/vscode-git-log-viewer"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.136.0"
   },
   "categories": [
     "Other"
@@ -123,14 +123,14 @@
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
-    "@types/node": "^26.1.2",
+    "@types/vscode": "^1.136.0",
+    "@types/node": "^26.5.0",
     "typescript": "^7.0.2",
     "esbuild": "^0.28.2",
     "@vscode/vsce": "^3.9.0",
-    "vitest": "^4.1.10",
-    "@vitest/coverage-v8": "^4.1.11",
-    "jsdom": "^25.0.0",
+    "vitest": "^5.0.0",
+    "@vitest/coverage-v8": "^5.0.0",
+    "jsdom": "^30.0.1",
     "c8": "^12.0.0"
   }
 }
