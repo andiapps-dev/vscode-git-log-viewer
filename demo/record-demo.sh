@@ -65,7 +65,7 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 # Installs the lightweight CLI tools this script drives (xdotool, ffmpeg,
 # wmctrl, fontconfig for fc-match) if they're missing. Only targets apt
 # (Debian/Ubuntu) since that's what build.sh/install.sh already assume via
-# their node:20-slim Docker base. Fails loudly with guidance for the two
+# their node:22-slim Docker base. Fails loudly with guidance for the two
 # heavier dependencies (docker, the VS Code CLI) rather than attempting to
 # install those itself.
 check_prereqs() {
@@ -325,7 +325,7 @@ finalize_coverage() {
         -v "$COVERAGE_DIR:$COVERAGE_DIR" \
         -v "$WORK:$WORK" \
         -v "$EXT_DIR:$EXT_DIR" \
-        node:20-slim sh -c \
+        node:22-slim sh -c \
         "cd '$EXT_DIR' && npm install --silent 2>&1 | tail -3 && cd '$installed_dir' && '$EXT_DIR/node_modules/.bin/c8' report --temp-directory='$COVERAGE_DIR' --reporter=text --reporter=lcov --report-dir='$COVERAGE_OUT_DIR' --include=extension.js" \
         2>&1 | tail -40
     sudo chown -R "$(id -u):$(id -g)" "$COVERAGE_OUT_DIR"
@@ -334,7 +334,7 @@ finalize_coverage() {
 
 echo "=== 1. Building fresh vsix ==="
 rm -f "$EXT_DIR"/*.vsix
-sudo docker run --rm -v "$EXT_DIR:/workspace" -w /workspace node:20-slim sh -c \
+sudo docker run --rm -v "$EXT_DIR:/workspace" -w /workspace node:22-slim sh -c \
     "npm install >/dev/null 2>&1 && npm run build >/dev/null 2>&1 && npx @vscode/vsce package --allow-missing-repository -o /workspace/demo-build.vsix" \
     2>&1 | tail -5
 sudo chown -R "$(id -u):$(id -g)" "$EXT_DIR"

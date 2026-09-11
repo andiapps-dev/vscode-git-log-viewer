@@ -38,7 +38,7 @@ echo "=== 0. Cleaning $DEMO_REPO's working tree ==="
 
 echo "=== 1. Building fresh vsix ==="
 rm -f "$EXT_DIR"/*.vsix
-sudo docker run --rm -v "$EXT_DIR:/workspace" -w /workspace node:20-slim sh -c \
+sudo docker run --rm -v "$EXT_DIR:/workspace" -w /workspace node:22-slim sh -c \
     "npm install >/dev/null 2>&1 && npm run build >/dev/null 2>&1 && npx @vscode/vsce package --allow-missing-repository -o /workspace/demo-build.vsix" \
     2>&1 | tail -5
 sudo chown -R "$(id -u):$(id -g)" "$EXT_DIR"

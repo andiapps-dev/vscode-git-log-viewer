@@ -10,7 +10,7 @@ rm -f "$SCRIPT_DIR"/*.vsix
 sudo rm -rf "$SCRIPT_DIR/node_modules" "$SCRIPT_DIR/dist"
 
 echo "Building DEV extension in Docker..."
-sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:20-slim sh -c '
+sudo docker run --rm -v "$SCRIPT_DIR:/workspace" -w /workspace node:22-slim sh -c '
     cp package.json package.json.bak
     cp package-lock.json package-lock.json.bak
 

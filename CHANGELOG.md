@@ -5,6 +5,25 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
+## [Unreleased]
+
+### Changed
+
+- Raised the minimum required VS Code version from 1.85.0 to 1.136.0, to
+  match `@types/vscode`'s own bump to 1.136.0 — `vsce` refuses to package
+  the extension otherwise, since the declared minimum has to cover
+  whatever the type definitions expose. Users on VS Code older than
+  1.136 will no longer be able to install or update the extension.
+- Updated dependencies: `vitest` to 5.0.0, `@vitest/coverage-v8` to
+  5.0.0, `jsdom` to 30.0.1, `@types/node` to 26.5.0, and the
+  `github/codeql-action` GitHub Action to v4.
+- Raised the Node version used to build and test the extension (Docker
+  images in `build.sh`/`install.sh`/`test.sh`/the demo scripts, and CI's
+  `actions/setup-node`) from 20 to 22 — required by `vitest` 5 and
+  `jsdom` 30, both of which dropped Node 20 support. This only affects
+  the dev/CI toolchain, not the shipped extension itself (esbuild's
+  bundled output is unaffected by the Node version it was built with).
+
 ## [0.5.1] - 2026-09-02
 
 ### Changed
