@@ -112,7 +112,7 @@ All views automatically adapt to your VS Code theme (dark, light, or high contra
 
 ## Requirements
 
-- VS Code 1.85 or later
+- VS Code 1.136 or later
 - Git installed and available in PATH
 
 No other extensions required.
