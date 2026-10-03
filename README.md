@@ -86,13 +86,16 @@ All views automatically adapt to your VS Code theme (dark, light, or high contra
 2. Either:
    - In the Explorer sidebar, right-click any file or folder and select **Show Git Log**, or
    - With a file open in the editor, right-click and select **Show Git Log**, or press **Ctrl+Alt+]** (**Cmd+Alt+]** on Mac), or
-   - Click the Git Log Viewer icon in the editor tab bar or the Source Control panel title
+   - Click the Git Log Viewer icon in the editor tab bar or the Source Control panel title, or
+   - Click the **Git Log** status bar item, or run **Git Log Viewer: Show Git Log for Repository Root** from the Command Palette, for the full repository log regardless of which file or folder is selected
 
 ### Keyboard & Mouse
 
 | Action | Effect |
 |--------|--------|
-| Ctrl+Alt+] / Cmd+Alt+] (editor) | Show Git Log for the current file |
+| Ctrl+Alt+] / Cmd+Alt+] (editor focused) | Show Git Log for the current file |
+| Ctrl+Alt+] / Cmd+Alt+] (nothing focused) | Show Git Log for the repository root |
+| F5 (Git Log Viewer panel focused) | Refresh the commit list (or compare view) — rebindable like any other command |
 | Click commit | Select commit, show details and changed files |
 | Ctrl+Click commit | Multi-select (up to 2 commits for comparison) |
 | Right-click commit (2 selected) | Compare Selected Revisions |

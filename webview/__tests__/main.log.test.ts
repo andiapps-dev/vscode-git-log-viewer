@@ -1091,6 +1091,27 @@ describe('log mode: menu dismissal', () => {
     });
 });
 
+describe('log mode: F5 refresh', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('re-requests the commit list from offset 0 on a refresh message from the extension host', async () => {
+        const { api } = await loadWebview({ mode: 'log', targetPath: '/repo', isFile: false });
+        sendFromExtension({ type: 'commitsLoaded', commits: [commit({ hash: 'h1' })], hasMore: false });
+        expect(document.querySelectorAll('#commit-tbody tr.data-row').length).toBe(1);
+        api.postMessage.mockClear();
+
+        sendFromExtension({ type: 'refresh' });
+
+        // reloadCommits() clears the table (and selection) before re-requesting.
+        expect(document.querySelectorAll('#commit-tbody tr.data-row').length).toBe(0);
+        const lastCall = api.postMessage.mock.calls[api.postMessage.mock.calls.length - 1][0];
+        expect(lastCall.type).toBe('requestCommits');
+        expect(lastCall.offset).toBe(0);
+    });
+});
+
 describe('log mode: errors', () => {
     beforeEach(() => {
         document.body.innerHTML = '';

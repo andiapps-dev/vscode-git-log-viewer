@@ -326,10 +326,22 @@ td.col-deletions { text-align: right; color: var(--vscode-gitDecoration-deletedR
 }
 
 .context-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     padding: 6px 20px;
     cursor: pointer;
     white-space: nowrap;
     color: var(--vscode-menu-foreground);
+}
+
+/* Shows a real VS Code keybinding next to the menu item it triggers (e.g.
+   F5 next to Refresh) - the same convention native VS Code menus use for
+   their own commands. Only ever added where there's an actual contributed
+   keybinding behind it, not decoration. */
+.context-menu-hotkey {
+    color: var(--vscode-descriptionForeground);
 }
 
 .context-menu-item:hover {

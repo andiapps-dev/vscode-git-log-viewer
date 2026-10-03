@@ -89,10 +89,16 @@ relying on it here.
 3. Launches that profile against the target repo, sized to a fixed geometry,
    and dismisses the first-run "Welcome to VS Code" wizard a brand-new
    profile always shows.
-4. Makes one throwaway uncommitted edit to the target file (so there's
+4. Shows a confirmation dialog ("Ready to record?") and waits for you to
+   click Yes before doing anything else - every action from here on
+   targets a fixed screen coordinate, so touching your own mouse or
+   keyboard once the actual recording starts can throw off window focus or
+   the cursor position for every step after it. Cancelling (or closing the
+   dialog) exits cleanly without recording anything.
+5. Makes one throwaway uncommitted edit to the target file (so there's
    something to show for "Compare with Working Tree"), reverted at the end
    no matter how the script exits.
-5. Records each feature as its own clip, preceded by a title card
+6. Records each feature as its own clip, preceded by a title card
    (`add_title`) giving context on what's about to happen, then
    concatenates everything and converts it to a palette-optimized GIF at
    `output/git-log-viewer-demo.gif`.
@@ -128,11 +134,11 @@ exits - a killed process may not.
 
 `docker`, `code` (VS Code CLI), and `sudo` (the Docker build step matches
 `build.sh`/`install.sh`). `xdotool`, `ffmpeg`, `wmctrl`, `fontconfig`,
-`curl`, and `python3` are checked at startup and auto-installed via `apt`
-if missing, and the `websocket-client` pip package is installed if missing
-too - `check_prereqs` deliberately doesn't try to install docker or VS Code
-itself, since those are bigger, more invasive decisions than a demo
-recording script should make on its own.
+`curl`, `python3`, and `zenity` are checked at startup and auto-installed
+via `apt` if missing, and the `websocket-client` pip package is installed
+if missing too - `check_prereqs` deliberately doesn't try to install
+docker or VS Code itself, since those are bigger, more invasive decisions
+than a demo recording script should make on its own.
 
 `python3` + `websocket-client` drive the one part of this script that talks
 to the webview via Chrome DevTools Protocol instead of simulated mouse

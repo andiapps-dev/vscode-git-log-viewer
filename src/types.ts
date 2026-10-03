@@ -182,3 +182,7 @@ export interface ErrorMessage {
     type: 'error';
     message: string;
 }
+
+export interface RefreshMessage {
+    type: 'refresh';
+}

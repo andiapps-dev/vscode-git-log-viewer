@@ -47,7 +47,7 @@ export const LOG_BODY = `
     <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
-    <div class="context-menu-item" id="ctx-refresh">Refresh</div>
+    <div class="context-menu-item" id="ctx-refresh"><span>Refresh</span><span class="context-menu-hotkey">F5</span></div>
 </div>
 <div id="commit-context-menu" class="context-menu" style="display:none;">
     <div class="context-menu-item" id="ctx-compare-revisions">Compare Selected Revisions</div>
@@ -55,7 +55,7 @@ export const LOG_BODY = `
     <div class="context-menu-item" id="ctx-branches">Branches</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-commit-clear-filters" style="display:none;">Clear Filters</div>
-    <div class="context-menu-item" id="ctx-commit-refresh">Refresh</div>
+    <div class="context-menu-item" id="ctx-commit-refresh"><span>Refresh</span><span class="context-menu-hotkey">F5</span></div>
 </div>
 <div id="branches-submenu" class="context-menu" style="display:none;"></div>
 <div id="commit-graph-tooltip" style="display:none;"></div>
@@ -97,7 +97,7 @@ export const COMPARE_BODY = `
     <div class="context-menu-item" id="ctx-folder-view">Folder View</div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item" id="ctx-clear-filters" style="display:none;">Clear Filters</div>
-    <div class="context-menu-item" id="ctx-refresh">Refresh</div>
+    <div class="context-menu-item" id="ctx-refresh"><span>Refresh</span><span class="context-menu-hotkey">F5</span></div>
 </div>
 `;
 
