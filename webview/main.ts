@@ -1005,9 +1005,18 @@ function showContextMenuAt(e: MouseEvent, file: FileChange | null): void {
     }
     /* v8 ignore stop */
 
+    // Log mode's own commit-list panel already has a Refresh entry
+    // (ctx-commit-refresh, in #commit-context-menu) - this one is
+    // redundant there, hence hidden. Compare mode has no commit-list
+    // panel at all though, so this is its only one; hiding it
+    // unconditionally (as this did before) left compare mode with no
+    // working way to refresh from the menu at all - confirmed live, not
+    // just inferred from the code, since the existing unit test for this
+    // ('refreshes by re-requesting compare files') calls .click() on the
+    // element directly, which fires regardless of its CSS display.
     const refreshItem = document.getElementById('ctx-refresh');
     const separator = contextMenu.querySelector('.context-menu-separator');
-    if (refreshItem) refreshItem.style.display = 'none';
+    if (refreshItem) refreshItem.style.display = state.mode === 'log' ? 'none' : '';
     if (separator) (separator as HTMLElement).style.display = '';
 
     clampMenu(contextMenu);
@@ -1833,6 +1842,21 @@ window.addEventListener('message', (event) => {
         case 'error': {
             if (commitDetailPanel) {
                 commitDetailPanel.innerHTML = `<div class="empty-state">${escapeHtml(msg.message)}</div>`;
+            }
+            break;
+        }
+        case 'refresh': {
+            // Sent by the F5 keybinding (gitLogViewer.refresh, handled
+            // extension-side in gitLogPanel.ts - see its comment on
+            // refreshActivePanel for why it's a real contributed keybinding
+            // rather than a hardcoded listener here). Same logic as the
+            // ctx-refresh/ctx-commit-refresh context-menu items below -
+            // blame mode has no refresh of its own either, so this is a
+            // no-op there too, matching their existing behavior.
+            if (state.mode === 'log') {
+                reloadCommits();
+            } else if (state.mode === 'compare') {
+                vscode.postMessage({ type: 'requestCompareFiles' });
             }
             break;
         }

@@ -24,7 +24,7 @@
 #      it in place for the whole recording, so it doesn't linger as an
 #      unrelated diff the rest of the recording has to ignore.
 #
-# Requires: xdotool, ffmpeg, wmctrl, fontconfig, curl, python3 + the
+# Requires: xdotool, ffmpeg, wmctrl, fontconfig, curl, python3, zenity + the
 # websocket-client pip package, docker, code (VS Code CLI). All but the
 # last two are auto-installed if missing (see check_prereqs); docker and
 # the VS Code CLI are left alone since installing those is a bigger, more
@@ -76,6 +76,7 @@ check_prereqs() {
     command -v fc-match >/dev/null 2>&1 || apt_pkgs+=(fontconfig)
     command -v curl >/dev/null 2>&1 || apt_pkgs+=(curl)
     command -v python3 >/dev/null 2>&1 || apt_pkgs+=(python3)
+    command -v zenity >/dev/null 2>&1 || apt_pkgs+=(zenity)
 
     if [ "${#apt_pkgs[@]}" -gt 0 ]; then
         if ! command -v apt-get >/dev/null 2>&1; then
@@ -394,6 +395,27 @@ sleep 1.5
 demo_mousemove 1866 73
 demo_click 1
 sleep 1
+
+# Gives you a moment to get your hands fully off the mouse/keyboard before
+# the long, uninterrupted automated sequence begins - every action from
+# here on targets a hardcoded screen coordinate or sends real synthetic
+# input, so even a stray mouse move or keystroke from you partway through
+# can steal window focus or leave the cursor somewhere a later step
+# doesn't expect, throwing off everything after it. Blocks on a real
+# dialog (zenity) so it's impossible to miss even if you're not looking at
+# the terminal; falls back to a plain terminal prompt if zenity somehow
+# isn't available. Exits cleanly (via the usual cleanup() trap) if you
+# cancel instead of confirming.
+echo "=== 4. Waiting for confirmation before recording ==="
+if command -v zenity >/dev/null 2>&1; then
+    zenity --question --no-wrap --title="Git Log Viewer demo" \
+        --text="Ready to record?\n\nOnce you click Yes, keep your hands off the mouse and keyboard until it's done - every action in the script targets a fixed screen position." \
+        --ok-label="Yes, start recording" --cancel-label="Cancel" \
+        || { echo "Cancelled before recording started." >&2; exit 1; }
+else
+    echo "zenity isn't available - falling back to a terminal prompt." >&2
+    read -r -p "Ready to record? Keep your hands off the mouse/keyboard once you press Enter (Ctrl+C to cancel): " _
+fi
 
 echo "=== 5. Recording segments ==="
 

@@ -2,7 +2,7 @@
   "name": "vscode-git-log-viewer",
   "displayName": "Git Log Viewer",
   "description": "TortoiseGit-style log dialog for files and folders",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "license": "MIT",
   "publisher": "andiapps",
   "repository": {
@@ -19,6 +19,9 @@
     "workspace"
   ],
   "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
@@ -30,6 +33,18 @@
         "command": "gitLogViewer.showLineHistory",
         "title": "Show Line History",
         "icon": "$(history)"
+      },
+      {
+        "command": "gitLogViewer.refresh",
+        "title": "Refresh",
+        "category": "Git Log Viewer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitLogViewer.showRepoLog",
+        "title": "Show Git Log for Repository Root",
+        "category": "Git Log Viewer",
+        "icon": "$(git-commit)"
       }
     ],
     "menus": {
@@ -88,6 +103,14 @@
         {
           "command": "gitLogViewer.showLineHistory",
           "when": "config.git.enabled && gitOpenRepositoryCount != 0"
+        },
+        {
+          "command": "gitLogViewer.refresh",
+          "when": "activeWebviewPanelId == 'gitLogViewer'"
+        },
+        {
+          "command": "gitLogViewer.showRepoLog",
+          "when": "config.git.enabled && gitOpenRepositoryCount != 0"
         }
       ]
     },
@@ -97,6 +120,17 @@
         "key": "ctrl+alt+]",
         "mac": "cmd+alt+]",
         "when": "editorTextFocus && config.git.enabled && gitOpenRepositoryCount != 0"
+      },
+      {
+        "command": "gitLogViewer.showRepoLog",
+        "key": "ctrl+alt+]",
+        "mac": "cmd+alt+]",
+        "when": "!editorTextFocus && config.git.enabled && gitOpenRepositoryCount != 0"
+      },
+      {
+        "command": "gitLogViewer.refresh",
+        "key": "f5",
+        "when": "activeWebviewPanelId == 'gitLogViewer'"
       }
     ],
     "configuration": {
@@ -124,13 +158,13 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.136.0",
-    "@types/node": "^26.5.0",
+    "@types/node": "^26.6.2",
     "typescript": "^7.0.2",
     "esbuild": "^0.28.2",
-    "@vscode/vsce": "^3.9.0",
-    "vitest": "^5.0.0",
-    "@vitest/coverage-v8": "^5.0.0",
-    "jsdom": "^30.0.1",
+    "@vscode/vsce": "^4.0.0",
+    "vitest": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.1",
+    "jsdom": "^30.1.1",
     "c8": "^12.0.0"
   }
 }

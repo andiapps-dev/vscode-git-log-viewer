@@ -5,6 +5,43 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
+## [Unreleased]
+
+### Added
+
+- **F5 to refresh** — while a Git Log Viewer panel is focused, F5 re-fetches
+  the commit list (or compare view) from git instead of falling through to
+  VS Code's own default F5 behavior. A real contributed keybinding (not a
+  hardcoded shortcut), so it's rebindable like any other command via
+  Keyboard Shortcuts, and scoped to only this extension's own panels —
+  F5 continues to behave normally everywhere else (e.g. starting a debug
+  session).
+- A **status bar item** ("Git Log") for one-click access to the full
+  repository log regardless of which file or folder is selected — in a
+  single-folder workspace, the repo root has no right-clickable row in
+  the Explorer at all (it's only shown as the panel's own title text), so
+  this is the fix for that gap. Also available via the Command Palette
+  ("Git Log Viewer: Show Git Log for Repository Root").
+- Ctrl+Alt+] / Cmd+Alt+] now falls back to the repository root log when
+  nothing is focused (no active editor), instead of doing nothing —
+  unchanged when a file is focused, which still shows that file's log.
+- The Refresh item in both right-click menus now shows F5 next to it,
+  matching the keybinding that triggers it.
+
+### Fixed
+
+- Comparing two revisions had no working way to refresh from its
+  right-click menu — the Refresh item was present but unconditionally
+  hidden regardless of mode, a leftover from when it was deliberately
+  hidden for the main log view (which has its own Refresh on the commit
+  list instead). Compare view has no such alternative, so this left it
+  with no menu-driven way to refresh at all.
+
+### Changed
+
+- Updated dependencies: `vitest` to 5.0.1, `@vitest/coverage-v8` to 5.0.1,
+  `jsdom` to 30.1.1, `@types/node` to 26.6.2, and `@vscode/vsce` to 4.0.0.
+
 ## [0.5.2] - 2026-09-11
 
 ### Changed

@@ -179,6 +179,13 @@ describe('compare mode', () => {
         expect(api.postMessage).toHaveBeenCalledWith({ type: 'requestCompareFiles' });
     });
 
+    it('also refreshes on a refresh message from the extension host (F5)', async () => {
+        const { api } = await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
+        api.postMessage.mockClear();
+        sendFromExtension({ type: 'refresh' });
+        expect(api.postMessage).toHaveBeenCalledWith({ type: 'requestCompareFiles' });
+    });
+
     it('clears filters and re-renders the file list in place (no reload)', async () => {
         const { api } = await loadWebview({ mode: 'compare', sha1: 'aaa111', sha2: 'bbb222' });
         sendFromExtension({
