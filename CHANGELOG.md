@@ -5,7 +5,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
-## [Unreleased]
+## [0.5.3] - 2026-10-03
 
 ### Added
 
