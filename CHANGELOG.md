@@ -5,6 +5,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [Semantic Versioning](https://semver.org/) — tags look
 like `v0.5.0`, and each one gets its own section below.
 
+## [Unreleased]
+
+### Changed
+
+- Updated dependencies: `vitest` to 5.0.5, `@vitest/coverage-v8` to 5.0.5,
+  `jsdom` to 30.1.3, and `@types/node` to 26.6.5.
+
 ## [0.5.3] - 2026-10-03
 
 ### Added
